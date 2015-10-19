@@ -465,6 +465,12 @@ const ViewSelector = new Lang.Class({
     },
 
     _shouldTriggerSearch: function(symbol) {
+        if (symbol == Clutter.Multi_key)
+            return true;
+
+        if (symbol == Clutter.BackSpace && this._searchActive)
+            return true;
+
         let unicode = Clutter.keysym_to_unicode(symbol);
         if (unicode == 0)
             return false;
@@ -472,7 +478,7 @@ const ViewSelector = new Lang.Class({
         if (getTermsForSearchString(String.fromCharCode(unicode)).length > 0)
             return true;
 
-        return symbol == Clutter.BackSpace && this._searchActive;
+        return false;
     },
 
     startSearch: function(event) {

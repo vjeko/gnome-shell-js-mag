@@ -24,6 +24,8 @@ const MSECS_IN_DAY = 24 * 60 * 60 * 1000;
 const SHOW_WEEKDATE_KEY = 'show-weekdate';
 const ELLIPSIS_CHAR = '\u2026';
 
+const MESSAGE_ICON_SIZE = 32;
+
 const MESSAGE_ANIMATION_TIME = 0.1;
 
 const DEFAULT_EXPAND_LINES = 6;
@@ -976,7 +978,6 @@ const Message = new Lang.Class({
         this._iconBin = new St.Bin({ style_class: 'message-icon-bin',
                                      y_expand: true,
                                      visible: false });
-        this._iconBin.set_y_align(Clutter.ActorAlign.START);
         hbox.add_actor(this._iconBin);
 
         let contentBox = new St.BoxLayout({ style_class: 'message-content',
@@ -1240,9 +1241,10 @@ const NotificationMessage = new Lang.Class({
 
     _getIcon: function() {
         if (this.notification.gicon)
-            return new St.Icon({ gicon: this.notification.gicon, icon_size: 48 });
+            return new St.Icon({ gicon: this.notification.gicon,
+                                 icon_size: MESSAGE_ICON_SIZE });
         else
-            return this.notification.source.createIcon(48);
+            return this.notification.source.createIcon(MESSAGE_ICON_SIZE);
     },
 
     _onUpdated: function(n, clear) {

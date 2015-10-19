@@ -535,6 +535,9 @@ const LoginDialog = new Lang.Class({
         let centerX = dialogBox.x1 + (dialogBox.x2 - dialogBox.x1) / 2;
         let centerY = dialogBox.y1 + (dialogBox.y2 - dialogBox.y1) / 2;
 
+        natWidth = Math.min(natWidth, dialogBox.x2 - dialogBox.x1);
+        natHeight = Math.min(natHeight, dialogBox.y2 - dialogBox.y1);
+
         actorBox.x1 = Math.floor(centerX - natWidth / 2);
         actorBox.y1 = Math.floor(centerY - natHeight / 2);
         actorBox.x2 = actorBox.x1 + natWidth;
@@ -584,7 +587,14 @@ const LoginDialog = new Lang.Class({
         // try a different layout, or if we have what extra space we
         // can hand out
         if (bannerAllocation) {
-            let leftOverYSpace = dialogHeight - bannerHeight - authPromptHeight - logoHeight;
+            let bannerSpace;
+
+            if (authPromptAllocation)
+                bannerSpace = authPromptAllocation.y1 - bannerAllocation.y1;
+            else
+                bannerSpace = 0;
+
+            let leftOverYSpace = bannerSpace - bannerHeight;
 
             if (leftOverYSpace > 0) {
                  // First figure out how much left over space is up top
@@ -867,7 +877,7 @@ const LoginDialog = new Lang.Class({
     },
 
     _loginScreenSessionActivated: function() {
-        if (this._authPrompt.verificationStatus != AuthPrompt.AuthPromptStatus.VERIFICATION_SUCCEEDED)
+        if (this.actor.opacity == 255 && this._authPrompt.verificationStatus == AuthPrompt.AuthPromptStatus.NOT_VERIFYING)
             return;
 
         Tweener.addTween(this.actor,
@@ -884,7 +894,8 @@ const LoginDialog = new Lang.Class({
                            },
                            onUpdateScope: this,
                            onComplete: function() {
-                               this._authPrompt.reset();
+                               if (this._authPrompt.verificationStatus != AuthPrompt.AuthPromptStatus.NOT_VERIFYING)
+                                   this._authPrompt.reset();
                            },
                            onCompleteScope: this });
     },

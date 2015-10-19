@@ -500,6 +500,11 @@ const AllView = new Lang.Class({
 
     _loadApps: function() {
         let apps = Gio.AppInfo.get_all().filter(function(appInfo) {
+            try {
+                let id = appInfo.get_id(); // catch invalid file encodings
+            } catch(e) {
+                return false;
+            }
             return appInfo.should_show();
         }).map(function(app) {
             return app.get_id();
@@ -753,7 +758,8 @@ const AllView = new Lang.Class({
         let fadeOffset = Math.min(this._grid.topPadding,
                                   this._grid.bottomPadding);
         this._scrollView.update_fade_effect(fadeOffset, 0);
-        this._scrollView.get_effect('fade').fade_edges = true;
+        if (fadeOffset > 0)
+            this._scrollView.get_effect('fade').fade_edges = true;
 
         if (this._availWidth != availWidth || this._availHeight != availHeight || oldNPages != this._grid.nPages()) {
             this._adjustment.value = 0;
@@ -1060,7 +1066,7 @@ const AppSearchProvider = new Lang.Class({
 
     getInitialResultSet: function(terms, callback, cancellable) {
         let query = terms.join(' ');
-        let groups = Gio.DesktopAppInfo.search(query);
+        let groups = Shell.AppSystem.search(query);
         let usage = Shell.AppUsage.get_default();
         let results = [];
         groups.forEach(function(group) {
@@ -1289,7 +1295,10 @@ const FolderIcon = new Lang.Class({
             if (!_listsIntersect(folderCategories, appCategories))
                 return;
 
-            addAppId(appInfo.get_id());
+            try {
+                addAppId(appInfo.get_id()); // catch invalid file encodings
+            } catch(e) {
+            }
         });
 
         this.actor.visible = this.view.getAllItems().length > 0;

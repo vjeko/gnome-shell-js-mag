@@ -837,6 +837,7 @@ const LayoutManager = new Lang.Class({
         // need to connect to 'destroy' too.
 
         this._trackedActors.push(actorData);
+        this._updateActorVisibility(actorData);
         this._queueUpdateRegions();
     },
 
@@ -855,25 +856,23 @@ const LayoutManager = new Lang.Class({
         this._queueUpdateRegions();
     },
 
+    _updateActorVisibility: function(actorData) {
+        if (!actorData.trackFullscreen)
+            return;
+
+        let monitor = this.findMonitorForActor(actorData.actor);
+        actorData.actor.visible = !(global.window_group.visible &&
+                                    monitor &&
+                                    monitor.inFullscreen);
+    },
+
     _updateVisibility: function() {
         let windowsVisible = Main.sessionMode.hasWindows && !this._inOverview;
 
         global.window_group.visible = windowsVisible;
         global.top_window_group.visible = windowsVisible;
 
-        for (let i = 0; i < this._trackedActors.length; i++) {
-            let actorData = this._trackedActors[i], visible;
-            if (!actorData.trackFullscreen)
-                continue;
-
-            if (!windowsVisible)
-                visible = true;
-            else if (this.findMonitorForActor(actorData.actor).inFullscreen)
-                visible = false;
-            else
-                visible = true;
-            actorData.actor.visible = visible;
-        }
+        this._trackedActors.forEach(Lang.bind(this, this._updateActorVisibility));
     },
 
     getWorkAreaForMonitor: function(monitorIndex) {
@@ -1316,8 +1315,11 @@ const PressureBarrier = new Lang.Class({
     },
 
     _onBarrierLeft: function(barrier, event) {
-        this._reset();
-        this._isTriggered = false;
+        barrier._isHit = false;
+        if (this._barriers.every(function(b) { return !b._isHit; })) {
+            this._reset();
+            this._isTriggered = false;
+        }
     },
 
     _trigger: function() {
@@ -1327,6 +1329,8 @@ const PressureBarrier = new Lang.Class({
     },
 
     _onBarrierHit: function(barrier, event) {
+        barrier._isHit = true;
+
         // If we've triggered the barrier, wait until the pointer has the
         // left the barrier hitbox until we trigger it again.
         if (this._isTriggered)

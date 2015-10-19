@@ -74,7 +74,7 @@ const WindowMenu = new Lang.Class({
                 window.make_above();
         }));
         if (window.is_above())
-            item.setOrnament(PopupMenu.Ornament.DOT);
+            item.setOrnament(PopupMenu.Ornament.CHECK);
         if (window.get_maximized() == Meta.MaximizeFlags.BOTH ||
             type == Meta.WindowType.DOCK ||
             type == Meta.WindowType.DESKTOP ||
@@ -93,7 +93,7 @@ const WindowMenu = new Lang.Class({
                     window.stick();
             }));
             if (isSticky)
-                item.setOrnament(PopupMenu.Ornament.DOT);
+                item.setOrnament(PopupMenu.Ornament.CHECK);
             if (window.is_always_on_all_workspaces())
                 item.setSensitive(false);
 
@@ -101,18 +101,60 @@ const WindowMenu = new Lang.Class({
 
             if (!isSticky) {
                 let workspace = window.get_workspace();
-                let idx = workspace.index();
-                if (idx > 0) {
+                if (workspace != workspace.get_neighbor(Meta.MotionDirection.LEFT)) {
+                     this.addAction(_("Move to Workspace Left"), Lang.bind(this, function(event) {
+                        window.change_workspace(workspace.get_neighbor(Meta.MotionDirection.LEFT));
+                    }));
+                }
+                if (workspace != workspace.get_neighbor(Meta.MotionDirection.RIGHT)) {
+                     this.addAction(_("Move to Workspace Right"), Lang.bind(this, function(event) {
+                        window.change_workspace(workspace.get_neighbor(Meta.MotionDirection.RIGHT));
+                    }));
+                }
+                if (workspace != workspace.get_neighbor(Meta.MotionDirection.UP)) {
                     this.addAction(_("Move to Workspace Up"), Lang.bind(this, function(event) {
                         window.change_workspace(workspace.get_neighbor(Meta.MotionDirection.UP));
                     }));
                 }
-                if (idx < nWorkspaces) {
+                if (workspace != workspace.get_neighbor(Meta.MotionDirection.DOWN)) {
                      this.addAction(_("Move to Workspace Down"), Lang.bind(this, function(event) {
                         window.change_workspace(workspace.get_neighbor(Meta.MotionDirection.DOWN));
                     }));
                 }
             }
+        }
+
+        let screen = global.screen;
+        let nMonitors = screen.get_n_monitors();
+        if (nMonitors > 1) {
+          this.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+          let monitorIndex = window.get_monitor();
+
+          let upMonitorIndex = screen.get_monitor_neighbor_index(monitorIndex, Meta.ScreenDirection.UP);
+          if (upMonitorIndex != -1) {
+            this.addAction(_("Move to Monitor Up"), Lang.bind(this, function(event) {
+              window.move_to_monitor(upMonitorIndex);
+            }));
+          }
+          let downMonitorIndex = screen.get_monitor_neighbor_index(monitorIndex, Meta.ScreenDirection.DOWN);
+          if (downMonitorIndex != -1) {
+            this.addAction(_("Move to Monitor Down"), Lang.bind(this, function(event) {
+              window.move_to_monitor(downMonitorIndex);
+            }));
+          }
+          let leftMonitorIndex = screen.get_monitor_neighbor_index(monitorIndex, Meta.ScreenDirection.LEFT);
+          if (leftMonitorIndex != -1) {
+            this.addAction(_("Move to Monitor Left"), Lang.bind(this, function(event) {
+              window.move_to_monitor(leftMonitorIndex);
+            }));
+          }
+          let rightMonitorIndex = screen.get_monitor_neighbor_index(monitorIndex, Meta.ScreenDirection.RIGHT);
+          if (rightMonitorIndex != -1) {
+            this.addAction(_("Move to Monitor Right"), Lang.bind(this, function(event) {
+              window.move_to_monitor(rightMonitorIndex);
+            }));
+          }
         }
 
         this.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
@@ -167,6 +209,10 @@ const WindowMenuManager = new Lang.Class({
         menu.connect('activate', function() {
             window.check_alive(global.get_current_time());
         });
+        let destroyId = window.connect('unmanaged',
+            function() {
+                menu.close();
+            });
 
         this._sourceActor.set_size(rect.width, rect.height);
         this._sourceActor.set_position(rect.x, rect.y);
@@ -180,6 +226,7 @@ const WindowMenuManager = new Lang.Class({
 
             this._sourceActor.hide();
             menu.destroy();
+            window.disconnect(destroyId);
         }));
     }
 });

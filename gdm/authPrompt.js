@@ -14,7 +14,7 @@ const ShellEntry = imports.ui.shellEntry;
 const Tweener = imports.ui.tweener;
 const UserWidget = imports.ui.userWidget;
 
-const DEFAULT_BUTTON_WELL_ICON_SIZE = 24;
+const DEFAULT_BUTTON_WELL_ICON_SIZE = 16;
 const DEFAULT_BUTTON_WELL_ANIMATION_DELAY = 1.0;
 const DEFAULT_BUTTON_WELL_ANIMATION_TIME = 0.3;
 
@@ -258,6 +258,7 @@ const AuthPrompt = new Lang.Class({
     },
 
     _onVerificationComplete: function() {
+        this.setActorInDefaultButtonWell(null);
         this.verificationStatus = AuthPromptStatus.VERIFICATION_SUCCEEDED;
 	this.cancelButton.reactive = false;
     },
@@ -281,6 +282,12 @@ const AuthPrompt = new Lang.Class({
         if (oldActor)
             Tweener.removeTweens(oldActor);
 
+        let wasSpinner;
+        if (oldActor == this._spinner.actor)
+            wasSpinner = true;
+        else
+            wasSpinner = false;
+
         let isSpinner;
         if (actor == this._spinner.actor)
             isSpinner = true;
@@ -290,6 +297,11 @@ const AuthPrompt = new Lang.Class({
         if (this._defaultButtonWellActor != actor && oldActor) {
             if (!animate) {
                 oldActor.opacity = 0;
+
+                if (wasSpinner) {
+                    if (this._spinner)
+                        this._spinner.stop();
+                }
             } else {
                 Tweener.addTween(oldActor,
                                  { opacity: 0,
@@ -298,7 +310,7 @@ const AuthPrompt = new Lang.Class({
                                    transition: 'linear',
                                    onCompleteScope: this,
                                    onComplete: function() {
-                                      if (isSpinner) {
+                                      if (wasSpinner) {
                                           if (this._spinner)
                                               this._spinner.stop();
                                       }
@@ -401,7 +413,7 @@ const AuthPrompt = new Lang.Class({
     },
 
     updateSensitivity: function(sensitive) {
-        this._updateNextButtonSensitivity(sensitive);
+        this._updateNextButtonSensitivity(sensitive && this._entry.text.length > 0);
         this._entry.reactive = sensitive;
         this._entry.clutter_text.editable = sensitive;
     },
@@ -432,8 +444,9 @@ const AuthPrompt = new Lang.Class({
         let oldStatus = this.verificationStatus;
         this.verificationStatus = AuthPromptStatus.NOT_VERIFYING;
         this.cancelButton.reactive = true;
+        this.nextButton.label = _("Next");
 
-        if (oldStatus == AuthPromptStatus.VERIFYING)
+        if (this._userVerifier)
             this._userVerifier.cancel();
 
         this._queryingService = null;
@@ -488,6 +501,7 @@ const AuthPrompt = new Lang.Class({
 
     finish: function(onComplete) {
         if (!this._userVerifier.hasPendingMessages) {
+            this._userVerifier.clear();
             onComplete();
             return;
         }
@@ -495,12 +509,13 @@ const AuthPrompt = new Lang.Class({
         let signalId = this._userVerifier.connect('no-more-messages',
                                                   Lang.bind(this, function() {
                                                       this._userVerifier.disconnect(signalId);
+                                                      this._userVerifier.clear();
                                                       onComplete();
                                                   }));
     },
 
     cancel: function() {
-        if (this.verificationStatus == AuthPromptStatus.NOT_VERIFYING || this.verificationStatus == AuthPromptStatus.VERIFICATION_SUCCEEDED) {
+        if (this.verificationStatus == AuthPromptStatus.VERIFICATION_SUCCEEDED) {
             return;
         }
         this.reset();

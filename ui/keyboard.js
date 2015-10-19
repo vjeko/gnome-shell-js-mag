@@ -24,9 +24,6 @@ const KEYBOARD_TYPE = 'keyboard-type';
 const A11Y_APPLICATIONS_SCHEMA = 'org.gnome.desktop.a11y.applications';
 const SHOW_KEYBOARD = 'screen-keyboard-enabled';
 
-const CURSOR_BUS_NAME = 'org.gnome.SettingsDaemon.Cursor';
-const CURSOR_OBJECT_PATH = '/org/gnome/SettingsDaemon/Cursor';
-
 const CARIBOU_BUS_NAME = 'org.gnome.Caribou.Daemon';
 const CARIBOU_OBJECT_PATH = '/org/gnome/Caribou/Daemon';
 
@@ -114,6 +111,35 @@ const Key = new Lang.Class({
                 key.release();
                 return Clutter.EVENT_PROPAGATE;
             }));
+        button.connect('touch-event', Lang.bind(this,
+            function (actor, event) {
+                let device = event.get_device();
+                let sequence = event.get_event_sequence();
+
+                // We only handle touch events here on wayland. On X11
+                // we do get emulated pointer events, which already works
+                // for single-touch cases. Besides, the X11 passive touch grab
+                // set up by Mutter will make us see first the touch events
+                // and later the pointer events, so it will look like two
+                // unrelated series of events, we want to avoid double handling
+                // in these cases.
+                if (!Meta.is_wayland_compositor())
+                    return Clutter.EVENT_PROPAGATE;
+
+                if (!this._touchPressed &&
+                    event.type() == Clutter.EventType.TOUCH_BEGIN) {
+                    device.sequence_grab(sequence, actor);
+                    this._touchPressed = true;
+                    key.press();
+                } else if (this._touchPressed &&
+                           event.type() == Clutter.EventType.TOUCH_END &&
+                           device.sequence_get_grabbed_actor(sequence) == actor) {
+                    device.sequence_ungrab(sequence);
+                    this._touchPressed = false;
+                    key.release();
+                }
+                return Clutter.EVENT_PROPAGATE;
+            }));
 
         return button;
     },
@@ -178,9 +204,6 @@ const Keyboard = new Lang.Class({
         this._keyboardSettings.connect('changed', Lang.bind(this, this._sync));
         this._a11yApplicationsSettings = new Gio.Settings({ schema_id: A11Y_APPLICATIONS_SCHEMA });
         this._a11yApplicationsSettings.connect('changed', Lang.bind(this, this._sync));
-        this._watchNameId = Gio.bus_watch_name(Gio.BusType.SESSION, CURSOR_BUS_NAME, 0,
-                                               Lang.bind(this, this._sync),
-                                               Lang.bind(this, this._sync));
         this._daemonProxy = null;
         this._lastDeviceId = null;
 
