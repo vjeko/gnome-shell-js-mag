@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Hidden=false
-X-GNOME-Autostart-enabled=true
-Name=Shell
-Exec=$HOME/dev/gnome-shell-js-mag/restart.sh
-Comment=Shell
