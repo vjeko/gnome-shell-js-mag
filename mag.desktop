@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Hidden=false
+X-GNOME-Autostart-enabled=true
+Name=Gnome Shell
+#Exec=${HOME}/dev/gnome-shell-js-mag/restart.sh
+Exec=/home/vjeko/dev/gnome-shell-js-mag/restart.sh
+Comment=Gnome Shell
