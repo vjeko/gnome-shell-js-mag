@@ -166,7 +166,7 @@ const Magnifier = new Lang.Class({
       let idx = this._tree.find([xMouse, yMouse]);
       let region = this._zoomRegions[idx];
 
-      if (region._xMagFactor + step < 0) return;
+      if (region._xMagFactor + step < 1) return;
 
       region.setMagFactor(region._xMagFactor + step, region._yMagFactor + step);
 
