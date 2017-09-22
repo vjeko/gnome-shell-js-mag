@@ -11,6 +11,8 @@ const Meta = imports.gi.Meta;
 const Shell = imports.gi.Shell;
 const St = imports.gi.St;
 
+const AccessDialog = imports.ui.accessDialog;
+const AudioDeviceSelection = imports.ui.audioDeviceSelection;
 const Components = imports.ui.components;
 const CtrlAltTab = imports.ui.ctrlAltTab;
 const EndSessionDialog = imports.ui.endSessionDialog;
@@ -62,6 +64,8 @@ let ctrlAltTabManager = null;
 let osdWindowManager = null;
 let osdMonitorLabeler = null;
 let sessionMode = null;
+let shellAccessDialogDBusService = null;
+let shellAudioSelectionDBusService = null;
 let shellDBusService = null;
 let shellMountOpDBusService = null;
 let screenSaverDBus = null;
@@ -78,6 +82,7 @@ let _startDate;
 let _defaultCssStylesheet = null;
 let _cssStylesheet = null;
 let _a11ySettings = null;
+let _themeResource = null;
 
 function _sessionUpdated() {
     if (sessionMode.isPrimary)
@@ -119,6 +124,8 @@ function start() {
                                        _loadDefaultStylesheet);
     _initializeUI();
 
+    shellAccessDialogDBusService = new AccessDialog.AccessDialogDBus();
+    shellAudioSelectionDBusService = new AudioDeviceSelection.AudioDeviceSelectionDBus();
     shellDBusService = new ShellDBus.GnomeShell();
     shellMountOpDBusService = new ShellMountOperation.GnomeShellMountOpHandler();
 
@@ -137,9 +144,7 @@ function _initializeUI() {
     Shell.WindowTracker.get_default();
     Shell.AppUsage.get_default();
 
-    let resource = Gio.Resource.load(global.datadir + '/gnome-shell-theme.gresource');
-    resource._register();
-
+    reloadThemeResource();
     _loadDefaultStylesheet();
 
     // Setup the stage hierarchy early
@@ -188,6 +193,8 @@ function _initializeUI() {
         global.reexec_self();
         return true;
     });
+
+    global.display.connect('gl-video-memory-purged', loadTheme);
 
     // Provide the bus object for gnome-session to
     // initiate logouts.
@@ -288,6 +295,14 @@ function getThemeStylesheet() {
  */
 function setThemeStylesheet(cssStylesheet) {
     _cssStylesheet = cssStylesheet ? Gio.File.new_for_path(cssStylesheet) : null;
+}
+
+function reloadThemeResource() {
+    if (_themeResource)
+        _themeResource._unregister();
+
+    _themeResource = Gio.Resource.load(global.datadir + '/gnome-shell-theme.gresource');
+    _themeResource._register();
 }
 
 /**
