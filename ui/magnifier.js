@@ -21,6 +21,8 @@ const PointerWatcher = imports.ui.pointerWatcher;
 const MOUSE_POLL_FREQUENCY = 15; // 60 HZ
 const CROSSHAIRS_CLIP_SIZE = [100, 100];
 const NO_CHANGE = 0.0;
+
+const POINTER_REST_TIME = 1000; // milliseconds
 const ZOOM_STEP = 0.25;
 
 // Settings
@@ -52,8 +54,8 @@ const CROSS_HAIRS_CLIP_KEY      = 'cross-hairs-clip';
 
 let magDBusService = null;
 
-const Node = new Lang.Class({
-  Name: "Node",
+const QuadTreeNode = new Lang.Class({
+  Name: "QuadTreeNode",
 
   _init: function(x, y) {
     this._x = x;
@@ -81,27 +83,27 @@ const QuadTree = new Lang.Class({
   },
 
   _find: function(node, [x, y]) {
-    if (!(node instanceof Node)) return node;
+    if (!(node instanceof QuadTreeNode)) return node;
 
     let idx = this._index([node._x, node._y], [x, y]);
     return this._find(node.children[idx], [x, y]);
   },
 
   _insert: function(node, newNode) {
-    if (node == null || !(node instanceof Node))  return newNode;
+    if (node == null || !(node instanceof QuadTreeNode))  return newNode;
 
     let idx = this._index([node._x, node._y], [newNode._x, newNode._y]);
     node.children[idx] = this._insert(node.children[idx], newNode);
 
     return node;
   },
-  
+
   insert: function([x, y], [width, height], value) {
-    var topLeftNode = new Node(x, y);
+    var topLeftNode = new QuadTreeNode(x, y);
     this._root = this._insert(this._root, topLeftNode);
     topLeftNode.children[0] = value;
 
-    var bottomRightNode = new Node(x + width, y + height);
+    var bottomRightNode = new QuadTreeNode(x + width, y + height);
     this._root = this._insert(this._root, bottomRightNode);
     bottomRightNode.children[3] = value;
   }
@@ -128,10 +130,6 @@ const Magnifier = new Lang.Class({
         this._cursorRoot = new Clutter.Actor();
         this._cursorRoot.add_actor(this._mouseSprite);
 
-        cursorTracker.connect('cursor-changed', Lang.bind(this, this._updateMouseSprite));
-        this._cursorTracker = cursorTracker;
-
-
         // Create the first ZoomRegion and initialize it according to the
         // magnification settings.
 
@@ -140,16 +138,17 @@ const Magnifier = new Lang.Class({
 
         for (let i = 0; i < Main.layoutManager.monitors.length; i++) {
           let m = Main.layoutManager.monitors[i];
-          let aZoomRegion = new ZoomRegion(this, this._cursorRoot,
-              m.x, m.y, m.width, m.height);
+          let aZoomRegion = new ZoomRegion(this, this._cursorRoot, m.x, m.y, m.width, m.height);
           this._zoomRegions.push(aZoomRegion);
-          this._settingsInit(aZoomRegion);
-          aZoomRegion.setActive(true);
+          let showAtLaunch = this._settingsInit(aZoomRegion);
+          aZoomRegion.setActive(showAtLaunch);
         }
 
+        cursorTracker.connect('cursor-changed', Lang.bind(this, this._updateMouseSprite));
+        this._cursorTracker = cursorTracker;
 
         this.startTrackingMouse();
-/////
+
         // Export to dbus.
         magDBusService = new MagnifierDBus.ShellMagnifier();
     },
@@ -243,8 +242,7 @@ const Magnifier = new Lang.Class({
      */
     startTrackingMouse: function() {
         if (!this._pointerWatch)
-            this._pointerWatch = PointerWatcher.getPointerWatcher().addWatch(
-                MOUSE_POLL_FREQUENCY, Lang.bind(this, this.scrollToMousePos));
+            this._pointerWatch = PointerWatcher.getPointerWatcher().addWatch(MOUSE_POLL_FREQUENCY, Lang.bind(this, this.scrollToMousePos));
     },
 
     /**
@@ -273,17 +271,16 @@ const Magnifier = new Lang.Class({
      * @return      true.
      */
     scrollToMousePos: function() {
-
         let [xMouse, yMouse, mask] = global.get_pointer();
 
         if (xMouse != this.xMouse || yMouse != this.yMouse) {
             this.xMouse = xMouse;
             this.yMouse = yMouse;
 
-            let idx = this._tree.find([xMouse, yMouse]);
+            let monitorIdx = this._tree.find([xMouse, yMouse]);
 
             let sysMouseOverAny = false;
-            if (this._zoomRegions[idx].scrollToMousePos())
+            if (this._zoomRegions[monitorIdx].scrollToMousePos())
                 sysMouseOverAny = true;
 
             if (sysMouseOverAny)
@@ -294,6 +291,48 @@ const Magnifier = new Lang.Class({
         return true;
     },
 
+    /**
+     * createZoomRegion:
+     * Create a ZoomRegion instance with the given properties.
+     * @xMagFactor:     The power to set horizontal magnification of the
+     *                  ZoomRegion.  A value of 1.0 means no magnification.  A
+     *                  value of 2.0 doubles the size.
+     * @yMagFactor:     The power to set the vertical magnification of the
+     *                  ZoomRegion.
+     * @roi             Object in the form { x, y, width, height } that
+     *                  defines the region to magnify.  Given in unmagnified
+     *                  coordinates.
+     * @viewPort        Object in the form { x, y, width, height } that defines
+     *                  the position of the ZoomRegion on screen.
+     * @return          The newly created ZoomRegion.
+     */
+    createZoomRegion: function(xMagFactor, yMagFactor, roi, viewPort) {
+        let zoomRegion = new ZoomRegion(this, this._cursorRoot);
+        zoomRegion.setViewPort(viewPort);
+
+        // We ignore the redundant width/height on the ROI
+        let fixedROI = new Object(roi);
+        fixedROI.width = viewPort.width / xMagFactor;
+        fixedROI.height = viewPort.height / yMagFactor;
+        zoomRegion.setROI(fixedROI);
+
+        zoomRegion.addCrosshairs(this._crossHairs);
+        return zoomRegion;
+    },
+
+    /**
+     * addZoomRegion:
+     * Append the given ZoomRegion to the list of currently defined ZoomRegions
+     * for this Magnifier instance.
+     * @zoomRegion:     The zoomRegion to add.
+     */
+    addZoomRegion: function(zoomRegion) {
+        if(zoomRegion) {
+            this._zoomRegions.push(zoomRegion);
+            if (!this.isTrackingMouse())
+                this.startTrackingMouse();
+        }
+    },
 
     /**
      * getZoomRegions:
@@ -633,7 +672,6 @@ const Magnifier = new Lang.Class({
         let delta = 400;
         let magFactor = parseFloat(this._settings.get_double(MAG_FACTOR_KEY).toFixed(2));
         return magFactor;
-//        magFactor = (global.screen_width - delta + magFactor * delta) / global.screen_width;
     },
 
 
@@ -832,8 +870,8 @@ const ZoomRegion = new Lang.Class({
             this._destroyActors();
         }
 
-//        this._syncCaretTracking();
-//        this._syncFocusTracking();
+        this._syncCaretTracking();
+        this._syncFocusTracking();
     },
 
     /**
@@ -938,6 +976,24 @@ const ZoomRegion = new Lang.Class({
     },
 
     /**
+     * setROI
+     * Sets the "region of interest" that the ZoomRegion is magnifying.
+     * @roi:    Object that defines the region of the screen to magnify.  It
+     *          has members x, y, width, height.  The values are in
+     *          screen (unmagnified) coordinate space.
+     */
+    setROI: function(roi) {
+        if (roi.width <= 0 || roi.height <= 0)
+            return;
+
+        this._followingCursor = false;
+        this._changeROI({ xMagFactor: this._viewPortWidth / roi.width,
+            yMagFactor: this._viewPortHeight / roi.height,
+            xCenter: roi.x + roi.width  / 2,
+            yCenter: roi.y + roi.height / 2 });
+    },
+
+    /**
      * getROI:
      * Retrieves the "region of interest" -- the rectangular bounds of that part
      * of the desktop that the magnified view is showing (x, y, width, height).
@@ -948,7 +1004,7 @@ const ZoomRegion = new Lang.Class({
     getROI: function(xFactor, yFactor, width, height) {
         let roiWidth = width / xFactor;
         let roiHeight = height / yFactor;
-        
+
         let [xMouse, yMouse, mask] = global.get_pointer();
         let [xCenter, yCenter] = this._clip(
             xMouse, yMouse, xFactor, yFactor, width, height);
@@ -1115,6 +1171,26 @@ const ZoomRegion = new Lang.Class({
 
         // Determine whether the system mouse pointer is over this zoom region.
         return this._isMouseOverRegion();
+    },
+
+    _clearScrollContentsTimer: function() {
+        if (this._scrollContentsTimerId != 0) {
+            Mainloop.source_remove(this._scrollContentsTimerId);
+            this._scrollContentsTimerId = 0;
+        }
+    },
+
+    _scrollContentsToDelayed: function(x, y) {
+        if (this._pointerIdleMonitor.get_idletime() >= POINTER_REST_TIME) {
+            this.scrollContentsTo(x, y);
+            return;
+        }
+
+        this._clearScrollContentsTimer();
+        this._scrollContentsTimerId = Mainloop.timeout_add(POINTER_REST_TIME, Lang.bind(this, function() {
+            this._scrollContentsToDelayed(x, y);
+            return GLib.SOURCE_REMOVE;
+        }));
     },
 
     /**
@@ -1328,7 +1404,7 @@ const ZoomRegion = new Lang.Class({
             yCenter = Math.min(yCenter, this._viewPortY + height - roiHeight / 2);
             yCenter = Math.max(yCenter, this._viewPortY + roiHeight / 2);
         }
-        
+
         return [xCenter, yCenter];
     },
 
@@ -1371,7 +1447,7 @@ const ZoomRegion = new Lang.Class({
         this._updateMousePosition(zoom);
     },
 
-    _isMouseOverRegion: function(zoom) {
+    _isMouseOverRegion: function() {
         // Return whether the system mouse sprite is over this ZoomRegion.  If the
         // mouse's position is not given, then it is fetched.
         let mouseIsOver = false;
@@ -1490,7 +1566,7 @@ const ZoomRegion = new Lang.Class({
         return [xPoint, yPoint];
     },
 
-    _screenToViewPort: function(screenX, screenY, 
+    _screenToViewPort: function(screenX, screenY,
                            [xMouse, yMouse],
                            xFactor, yFactor,
                            width, height) {
@@ -1548,14 +1624,14 @@ const ZoomRegion = new Lang.Class({
               this._xMagFactor, this._yMagFactor,
               this._viewPortWidth, this._viewPortHeight);
 
-        let [x, y] = this._screenToViewPort(xMouse, yMouse, 
+        let [x, y] = this._screenToViewPort(xMouse, yMouse,
             [mx, my],
             this._xMagFactor, this._yMagFactor,
             this._viewPortWidth, this._viewPortHeight);
 
         if (zoom && !xScale.is_playing()) {
 
-          let [xI, yI] = this._screenToViewPort(xMouse, yMouse, 
+          let [xI, yI] = this._screenToViewPort(xMouse, yMouse,
               this._centerFromMousePosition(xFactor, xFactor,
                 this._viewPortWidth, this._viewPortHeight),
               xFactor, xFactor,
@@ -1567,7 +1643,7 @@ const ZoomRegion = new Lang.Class({
           xPos.set_duration(this._lapse);
           xPos.set_interval( Clutter.Interval.new_with_values(
               imports.gi.GObject.type_from_name("gdouble"),
-              parseFloat(xI), 
+              parseFloat(xI),
               parseFloat(x)));
           xPos.rewind();
           xPos.start();
@@ -1575,7 +1651,7 @@ const ZoomRegion = new Lang.Class({
           yPos.set_duration(this._lapse);
           yPos.set_interval( Clutter.Interval.new_with_values(
               imports.gi.GObject.type_from_name("gdouble"),
-              parseFloat(yI), 
+              parseFloat(yI),
               parseFloat(y)));
           yPos.rewind();
           yPos.start();
@@ -1609,13 +1685,13 @@ const ZoomRegion = new Lang.Class({
           a = a/Math.abs(a);
           b = b/Math.abs(b);
 
-          let [xStart, yStart] = this._screenToViewPort(xMouse, yMouse, 
+          let [xStart, yStart] = this._screenToViewPort(xMouse, yMouse,
               this._centerFromMousePosition(data.start, data.start,
                 this._viewPortWidth, this._viewPortHeight),
-              data.start, data.start, 
+              data.start, data.start,
               this._viewPortWidth, this._viewPortHeight);
 
-          let [xEnd, yEnd] = this._screenToViewPort(xMouse, yMouse, 
+          let [xEnd, yEnd] = this._screenToViewPort(xMouse, yMouse,
               this._centerFromMousePosition(data.end, data.end,
                 this._viewPortWidth, this._viewPortHeight),
               data.end, data.end,
@@ -1671,13 +1747,7 @@ const ZoomRegion = new Lang.Class({
           actor.set_position(x, y);
           data.xProgress = 0;
           data.yProgress = 0;
-
-          if (actor == this._uiGroupClone) {
-//            this._uiGroupClone.set_clip(x, y, 500, 500);
-          }
         }
-
-
     },
 
     _updateCloneGeometry: function(zoom) {
