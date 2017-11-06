@@ -13,12 +13,13 @@ const St = imports.gi.St;
 const Main = imports.ui.main;
 const Tweener = imports.ui.tweener;
 
-const POPUP_DELAY_TIMEOUT = 150; // milliseconds
+var POPUP_DELAY_TIMEOUT = 150; // milliseconds
 
-const POPUP_SCROLL_TIME = 0.10; // seconds
-const POPUP_FADE_OUT_TIME = 0.1; // seconds
+var POPUP_SCROLL_TIME = 0.10; // seconds
+var POPUP_FADE_OUT_TIME = 0.1; // seconds
 
-const DISABLE_HOVER_TIMEOUT = 500; // milliseconds
+var DISABLE_HOVER_TIMEOUT = 500; // milliseconds
+var NO_MODS_TIMEOUT = 1500; // milliseconds
 
 function mod(a, b) {
     return (a + b) % b;
@@ -36,7 +37,7 @@ function primaryModifier(mask) {
     return primary;
 }
 
-const SwitcherPopup = new Lang.Class({
+var SwitcherPopup = new Lang.Class({
     Name: 'SwitcherPopup',
     Abstract: true,
 
@@ -61,6 +62,7 @@ const SwitcherPopup = new Lang.Class({
 
         this._motionTimeoutId = 0;
         this._initialDelayTimeoutId = 0;
+        this._noModsTimeoutId = 0;
 
         // Initially disable hover so we ignore the enter-event if
         // the switcher appears underneath the current pointer location
@@ -145,10 +147,14 @@ const SwitcherPopup = new Lang.Class({
         // https://bugzilla.gnome.org/show_bug.cgi?id=596695 for
         // details.) So we check now. (Have to do this after updating
         // selection.)
-        let [x, y, mods] = global.get_pointer();
-        if (!(mods & this._modifierMask)) {
-            this._finish(global.get_current_time());
-            return false;
+        if (this._modifierMask) {
+            let [x, y, mods] = global.get_pointer();
+            if (!(mods & this._modifierMask)) {
+                this._finish(global.get_current_time());
+                return false;
+            }
+        } else {
+            this._resetNoModsTimeout();
         }
 
         // We delay showing the popup so that fast Alt+Tab users aren't
@@ -192,11 +198,15 @@ const SwitcherPopup = new Lang.Class({
     },
 
     _keyReleaseEvent: function(actor, event) {
-        let [x, y, mods] = global.get_pointer();
-        let state = mods & this._modifierMask;
+        if (this._modifierMask) {
+            let [x, y, mods] = global.get_pointer();
+            let state = mods & this._modifierMask;
 
-        if (state == 0)
-            this._finish(event.get_time());
+            if (state == 0)
+                this._finish(event.get_time());
+        } else {
+            this._resetNoModsTimeout();
+        }
 
         return Clutter.EVENT_STOP;
     },
@@ -253,6 +263,18 @@ const SwitcherPopup = new Lang.Class({
         return GLib.SOURCE_REMOVE;
     },
 
+    _resetNoModsTimeout: function() {
+        if (this._noModsTimeoutId != 0)
+            Mainloop.source_remove(this._noModsTimeoutId);
+
+        this._noModsTimeoutId = Mainloop.timeout_add(NO_MODS_TIMEOUT,
+                                                     Lang.bind(this, function () {
+                                                         this._finish(global.get_current_time());
+                                                         this._noModsTimeoutId = 0;
+                                                         return GLib.SOURCE_REMOVE;
+                                                     }));
+    },
+
     _popModal: function() {
         if (this._haveModal) {
             Main.popModal(this.actor);
@@ -287,6 +309,8 @@ const SwitcherPopup = new Lang.Class({
             Mainloop.source_remove(this._motionTimeoutId);
         if (this._initialDelayTimeoutId != 0)
             Mainloop.source_remove(this._initialDelayTimeoutId);
+        if (this._noModsTimeoutId != 0)
+            Mainloop.source_remove(this._noModsTimeoutId);
     },
 
     _select: function(num) {
@@ -295,7 +319,7 @@ const SwitcherPopup = new Lang.Class({
     }
 });
 
-const SwitcherList = new Lang.Class({
+var SwitcherList = new Lang.Class({
     Name: 'SwitcherList',
 
     _init : function(squareItems) {
@@ -385,7 +409,7 @@ const SwitcherList = new Lang.Class({
 
         let n = this._items.length;
         bbox.connect('clicked', Lang.bind(this, function() { this._onItemClicked(n); }));
-        bbox.connect('enter-event', Lang.bind(this, function() { this._onItemEnter(n); }));
+        bbox.connect('motion-event', Lang.bind(this, function() { return this._onItemEnter(n); }));
 
         bbox.label_actor = label;
 
@@ -399,7 +423,11 @@ const SwitcherList = new Lang.Class({
     },
 
     _onItemEnter: function (index) {
-        this._itemEntered(index);
+        // Avoid reentrancy
+        if (index != this._currentItemEntered) {
+            this._currentItemEntered = index;
+            this._itemEntered(index);
+        }
         return Clutter.EVENT_PROPAGATE;
     },
 

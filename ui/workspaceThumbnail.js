@@ -18,24 +18,24 @@ const WindowManager = imports.ui.windowManager;
 const Workspace = imports.ui.workspace;
 const WorkspacesView = imports.ui.workspacesView;
 
-// The maximum size of a thumbnail is 1/8 the width and height of the screen
-let MAX_THUMBNAIL_SCALE = 1/8.;
+// The maximum size of a thumbnail is 1/10 the width and height of the screen
+let MAX_THUMBNAIL_SCALE = 1/10.;
 
-const RESCALE_ANIMATION_TIME = 0.2;
-const SLIDE_ANIMATION_TIME = 0.2;
+var RESCALE_ANIMATION_TIME = 0.2;
+var SLIDE_ANIMATION_TIME = 0.2;
 
 // When we create workspaces by dragging, we add a "cut" into the top and
 // bottom of each workspace so that the user doesn't have to hit the
 // placeholder exactly.
-const WORKSPACE_CUT_SIZE = 10;
+var WORKSPACE_CUT_SIZE = 10;
 
-const WORKSPACE_KEEP_ALIVE_TIME = 100;
+var WORKSPACE_KEEP_ALIVE_TIME = 100;
 
 const OVERRIDE_SCHEMA = 'org.gnome.shell.overrides';
 
 /* A layout manager that requests size only for primary_actor, but then allocates
    all using a fixed layout */
-const PrimaryActorLayout = new Lang.Class({
+var PrimaryActorLayout = new Lang.Class({
     Name: 'PrimaryActorLayout',
     Extends: Clutter.FixedLayout,
 
@@ -54,7 +54,7 @@ const PrimaryActorLayout = new Lang.Class({
     },
 });
 
-const WindowClone = new Lang.Class({
+var WindowClone = new Lang.Class({
     Name: 'WindowClone',
 
     _init : function(realWindow) {
@@ -254,7 +254,7 @@ const ThumbnailState = {
 /**
  * @metaWorkspace: a #Meta.Workspace
  */
-const WorkspaceThumbnail = new Lang.Class({
+var WorkspaceThumbnail = new Lang.Class({
     Name: 'WorkspaceThumbnail',
 
     _init : function(metaWorkspace) {
@@ -612,7 +612,7 @@ const WorkspaceThumbnail = new Lang.Class({
 Signals.addSignalMethods(WorkspaceThumbnail.prototype);
 
 
-const ThumbnailsBox = new Lang.Class({
+var ThumbnailsBox = new Lang.Class({
     Name: 'ThumbnailsBox',
 
     _init: function() {
@@ -676,6 +676,12 @@ const ThumbnailsBox = new Lang.Class({
         this._settings = new Gio.Settings({ schema_id: OVERRIDE_SCHEMA });
         this._settings.connect('changed::dynamic-workspaces',
             Lang.bind(this, this._updateSwitcherVisibility));
+
+        Main.layoutManager.connect('monitors-changed', Lang.bind(this, function() {
+            this._destroyThumbnails();
+            if (Main.overview.visible)
+                this._createThumbnails();
+        }));
     },
 
     _updateSwitcherVisibility: function() {
@@ -931,7 +937,8 @@ const ThumbnailsBox = new Lang.Class({
     },
 
     addThumbnails: function(start, count) {
-        this._ensurePorthole();
+        if (!this._ensurePorthole())
+            return;
         for (let k = start; k < start + count; k++) {
             let metaWorkspace = global.screen.get_workspace_by_index(k);
             let thumbnail = new WorkspaceThumbnail(metaWorkspace);
@@ -1119,7 +1126,12 @@ const ThumbnailsBox = new Lang.Class({
         // the size request to our children because we know how big they are and know
         // that the actors aren't depending on the virtual functions being called.
 
-        this._ensurePorthole();
+        if (!this._ensurePorthole()) {
+            alloc.min_size = -1;
+            alloc.natural_size = -1;
+            return;
+        }
+
         let themeNode = this.actor.get_theme_node();
 
         let spacing = themeNode.get_length('spacing');
@@ -1131,7 +1143,11 @@ const ThumbnailsBox = new Lang.Class({
     },
 
     _getPreferredWidth: function(actor, forHeight, alloc) {
-        this._ensurePorthole();
+        if (!this._ensurePorthole()) {
+            alloc.min_size = -1;
+            alloc.natural_size = -1;
+            return;
+        }
 
         let themeNode = this.actor.get_theme_node();
 
@@ -1152,8 +1168,13 @@ const ThumbnailsBox = new Lang.Class({
     // The "porthole" is the portion of the screen that we show in the
     // workspaces
     _ensurePorthole: function() {
+        if (!Main.layoutManager.primaryMonitor)
+            return false;
+
         if (!this._porthole)
             this._porthole = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
+
+        return true;
     },
 
     _allocate: function(actor, box, flags) {

@@ -9,9 +9,9 @@ const Main = imports.ui.main;
 const Tweener = imports.ui.tweener;
 const Meta = imports.gi.Meta;
 
-const FADE_TIME = 0.1;
+var FADE_TIME = 0.1;
 
-const OsdMonitorLabel = new Lang.Class({
+var OsdMonitorLabel = new Lang.Class({
     Name: 'OsdMonitorLabel',
 
     _init: function(monitor, label) {
@@ -52,7 +52,7 @@ const OsdMonitorLabel = new Lang.Class({
     }
 });
 
-const OsdMonitorLabeler = new Lang.Class({
+var OsdMonitorLabeler = new Lang.Class({
     Name: 'OsdMonitorLabeler',
 
     _init: function() {
@@ -114,6 +114,25 @@ const OsdMonitorLabeler = new Lang.Class({
         // In mirrored display setups, more than one physical outputs
         // might be showing the same logical monitor. In that case, we
         // join each output's labels on the same OSD widget.
+        for (let [monitor, labels] of this._monitorLabels.entries()) {
+            labels.sort();
+            this._osdLabels.push(new OsdMonitorLabel(monitor, labels.join(' ')));
+        }
+    },
+
+    show2: function(client, params) {
+        if (!this._trackClient(client))
+            return;
+
+        this._reset();
+
+        for (let connector in params) {
+            let monitor = this._monitorManager.get_monitor_for_connector(connector);
+            if (monitor == -1)
+                continue;
+            this._monitorLabels.get(monitor).push(params[connector].deep_unpack());
+        }
+
         for (let [monitor, labels] of this._monitorLabels.entries()) {
             labels.sort();
             this._osdLabels.push(new OsdMonitorLabel(monitor, labels.join(' ')));

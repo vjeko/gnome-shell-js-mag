@@ -33,7 +33,6 @@ var commandHeader = 'const Clutter = imports.gi.Clutter; ' +
                     'const Mainloop = imports.mainloop; ' +
                     'const Meta = imports.gi.Meta; ' +
                     'const Shell = imports.gi.Shell; ' +
-                    'const Tp = imports.gi.TelepathyGLib; ' +
                     'const Main = imports.ui.main; ' +
                     'const Lang = imports.lang; ' +
                     'const Tweener = imports.ui.tweener; ' +
@@ -47,9 +46,9 @@ var commandHeader = 'const Clutter = imports.gi.Clutter; ' +
 
 const HISTORY_KEY = 'looking-glass-history';
 // Time between tabs for them to count as a double-tab event
-const AUTO_COMPLETE_DOUBLE_TAB_DELAY = 500;
-const AUTO_COMPLETE_SHOW_COMPLETION_ANIMATION_DURATION = 0.2;
-const AUTO_COMPLETE_GLOBAL_KEYWORDS = _getAutoCompleteGlobalKeywords();
+var AUTO_COMPLETE_DOUBLE_TAB_DELAY = 500;
+var AUTO_COMPLETE_SHOW_COMPLETION_ANIMATION_DURATION = 0.2;
+var AUTO_COMPLETE_GLOBAL_KEYWORDS = _getAutoCompleteGlobalKeywords();
 
 function _getAutoCompleteGlobalKeywords() {
     const keywords = ['true', 'false', 'null', 'new'];
@@ -60,7 +59,7 @@ function _getAutoCompleteGlobalKeywords() {
     return keywords.concat(windowProperties).concat(headerProperties);
 }
 
-const AutoComplete = new Lang.Class({
+var AutoComplete = new Lang.Class({
     Name: 'AutoComplete',
 
     _init: function(entry) {
@@ -126,7 +125,7 @@ const AutoComplete = new Lang.Class({
 Signals.addSignalMethods(AutoComplete.prototype);
 
 
-const Notebook = new Lang.Class({
+var Notebook = new Lang.Class({
     Name: 'Notebook',
 
     _init: function() {
@@ -264,7 +263,7 @@ function objectToString(o) {
     }
 }
 
-const ObjLink = new Lang.Class({
+var ObjLink = new Lang.Class({
     Name: 'ObjLink',
 
     _init: function(lookingGlass, o, title) {
@@ -291,7 +290,7 @@ const ObjLink = new Lang.Class({
     }
 });
 
-const Result = new Lang.Class({
+var Result = new Lang.Class({
     Name: 'Result',
 
     _init: function(lookingGlass, command, o, index) {
@@ -314,7 +313,7 @@ const Result = new Lang.Class({
     }
 });
 
-const WindowList = new Lang.Class({
+var WindowList = new Lang.Class({
     Name: 'WindowList',
 
     _init: function(lookingGlass) {
@@ -362,7 +361,7 @@ const WindowList = new Lang.Class({
 });
 Signals.addSignalMethods(WindowList.prototype);
 
-const ObjInspector = new Lang.Class({
+var ObjInspector = new Lang.Class({
     Name: 'ObjInspector',
 
     _init: function(lookingGlass) {
@@ -472,7 +471,7 @@ const ObjInspector = new Lang.Class({
     }
 });
 
-const RedBorderEffect = new Lang.Class({
+var RedBorderEffect = new Lang.Class({
     Name: 'RedBorderEffect',
     Extends: Clutter.Effect,
 
@@ -498,7 +497,7 @@ const RedBorderEffect = new Lang.Class({
     },
 });
 
-const Inspector = new Lang.Class({
+var Inspector = new Lang.Class({
     Name: 'Inspector',
 
     _init: function(lookingGlass) {
@@ -632,7 +631,7 @@ const Inspector = new Lang.Class({
 
 Signals.addSignalMethods(Inspector.prototype);
 
-const Extensions = new Lang.Class({
+var Extensions = new Lang.Class({
     Name: 'Extensions',
 
     _init: function(lookingGlass) {
@@ -775,7 +774,7 @@ const Extensions = new Lang.Class({
     }
 });
 
-const LookingGlass = new Lang.Class({
+var LookingGlass = new Lang.Class({
     Name: 'LookingGlass',
 
     _init : function() {
@@ -784,6 +783,7 @@ const LookingGlass = new Lang.Class({
 
         this._open = false;
 
+        this._it = null;
         this._offset = 0;
         this._results = [];
 
@@ -834,19 +834,19 @@ const LookingGlass = new Lang.Class({
             return Clutter.EVENT_STOP;
         }));
 
-        let gcIcon = new St.Icon({ icon_name: 'gnome-fs-trash-full',
+        let gcIcon = new St.Icon({ icon_name: 'user-trash-full',
                                    icon_size: 24 });
         toolbar.add_actor(gcIcon);
         gcIcon.reactive = true;
         gcIcon.connect('button-press-event', Lang.bind(this, function () {
-           gcIcon.icon_name = 'gnome-fs-trash-empty';
+           gcIcon.icon_name = 'user-trash';
            System.gc();
            this._timeoutId = Mainloop.timeout_add(500, Lang.bind(this, function () {
-                gcIcon.icon_name = 'gnome-fs-trash-full';
+                gcIcon.icon_name = 'user-trash-full';
                 this._timeoutId = 0;
                 return GLib.SOURCE_REMOVE;
            }));
-           GLib.Source.set_name_by_id(this._timeoutId, '[gnome-shell] gcIcon.icon_name = \'gnome-fs-trash-full\'');
+           GLib.Source.set_name_by_id(this._timeoutId, '[gnome-shell] gcIcon.icon_name = \'user-trash-full\'');
            return Clutter.EVENT_PROPAGATE;
         }));
 

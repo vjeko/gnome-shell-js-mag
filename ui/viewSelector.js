@@ -10,6 +10,7 @@ const Signals = imports.signals;
 const Lang = imports.lang;
 const Shell = imports.gi.Shell;
 const St = imports.gi.St;
+const GObject = imports.gi.GObject;
 
 const AppDisplay = imports.ui.appDisplay;
 const Main = imports.ui.main;
@@ -23,14 +24,15 @@ const EdgeDragAction = imports.ui.edgeDragAction;
 const IconGrid = imports.ui.iconGrid;
 
 const SHELL_KEYBINDINGS_SCHEMA = 'org.gnome.shell.keybindings';
+var PINCH_GESTURE_THRESHOLD = 0.7;
 
-const ViewPage = {
+var ViewPage = {
     WINDOWS: 1,
     APPS: 2,
     SEARCH: 3
 };
 
-const FocusTrap = new Lang.Class({
+var FocusTrap = new Lang.Class({
     Name: 'FocusTrap',
     Extends: St.Widget,
 
@@ -51,9 +53,32 @@ function getTermsForSearchString(searchString) {
     return terms;
 }
 
-const ShowOverviewAction = new Lang.Class({
+var TouchpadShowOverviewAction = new Lang.Class({
+    Name: 'TouchpadShowOverviewAction',
+
+    _init: function(actor) {
+        actor.connect('captured-event', Lang.bind(this, this._handleEvent));
+    },
+
+    _handleEvent: function(actor, event) {
+        if (event.type() != Clutter.EventType.TOUCHPAD_PINCH)
+            return Clutter.EVENT_PROPAGATE;
+
+        if (event.get_touchpad_gesture_finger_count() != 3)
+            return Clutter.EVENT_PROPAGATE;
+
+        if (event.get_gesture_phase() == Clutter.TouchpadGesturePhase.END)
+            this.emit('activated', event.get_gesture_pinch_scale ());
+
+        return Clutter.EVENT_STOP;
+    }
+});
+Signals.addSignalMethods(TouchpadShowOverviewAction.prototype);
+
+var ShowOverviewAction = new Lang.Class({
     Name: 'ShowOverviewAction',
     Extends: Clutter.GestureAction,
+    Signals: { 'activated': { param_types: [GObject.TYPE_DOUBLE] } },
 
     _init : function() {
         this.parent();
@@ -112,9 +137,8 @@ const ShowOverviewAction = new Lang.Class({
         this.emit('activated', areaDiff);
     }
 });
-Signals.addSignalMethods(ShowOverviewAction.prototype);
 
-const ViewSelector = new Lang.Class({
+var ViewSelector = new Lang.Class({
     Name: 'ViewSelector',
 
     _init : function(searchEntry, showAppsButton) {
@@ -139,6 +163,13 @@ const ViewSelector = new Lang.Class({
         this._text.connect('key-focus-out', Lang.bind(this, function() {
             this._searchResults.highlightDefault(false);
         }));
+        this._entry.connect('popup-menu', () => {
+            if (!this._searchActive)
+                return;
+
+            this._entry.menu.close();
+            this._searchResults.popupMenuDefault();
+        });
         this._entry.connect('notify::mapped', Lang.bind(this, this._onMapped));
         global.stage.connect('notify::key-focus', Lang.bind(this, this._onStageKeyFocusChanged));
 
@@ -230,11 +261,16 @@ const ViewSelector = new Lang.Class({
         global.stage.add_action(gesture);
 
         gesture = new ShowOverviewAction();
-        gesture.connect('activated', Lang.bind(this, function(action, areaDiff) {
-            if (areaDiff < 0.7)
-                Main.overview.show();
-        }));
+        gesture.connect('activated', Lang.bind(this, this._pinchGestureActivated));
         global.stage.add_action(gesture);
+
+        gesture = new TouchpadShowOverviewAction(global.stage);
+        gesture.connect('activated', Lang.bind(this, this._pinchGestureActivated));
+    },
+
+    _pinchGestureActivated: function(action, scale) {
+        if (scale < PINCH_GESTURE_THRESHOLD)
+            Main.overview.show();
     },
 
     _toggleAppsPage: function() {

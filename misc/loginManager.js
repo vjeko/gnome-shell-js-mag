@@ -93,7 +93,7 @@ let _loginManager = null;
  */
 function getLoginManager() {
     if (_loginManager == null) {
-        if (haveSystemd() && GLib.getenv('XDG_SESSION_ID'))
+        if (haveSystemd())
             _loginManager = new LoginManagerSystemd();
         else
             _loginManager = new LoginManagerDummy();
@@ -102,7 +102,7 @@ function getLoginManager() {
     return _loginManager;
 }
 
-const LoginManagerSystemd = new Lang.Class({
+var LoginManagerSystemd = new Lang.Class({
     Name: 'LoginManagerSystemd',
 
     _init: function() {
@@ -119,7 +119,13 @@ const LoginManagerSystemd = new Lang.Class({
             return;
         }
 
-        this._proxy.GetSessionRemote(GLib.getenv('XDG_SESSION_ID'), Lang.bind(this,
+        let sessionId = GLib.getenv('XDG_SESSION_ID');
+        if (!sessionId) {
+            log('Unset XDG_SESSION_ID, getCurrentSessionProxy() called outside a user session.');
+            return;
+        }
+
+        this._proxy.GetSessionRemote(sessionId, Lang.bind(this,
             function(result, error) {
                 if (error) {
                     logError(error, 'Could not get a proxy for the current session');
@@ -183,7 +189,7 @@ const LoginManagerSystemd = new Lang.Class({
 });
 Signals.addSignalMethods(LoginManagerSystemd.prototype);
 
-const LoginManagerDummy = new Lang.Class({
+var LoginManagerDummy = new Lang.Class({
     Name: 'LoginManagerDummy',
 
     getCurrentSessionProxy: function(callback) {

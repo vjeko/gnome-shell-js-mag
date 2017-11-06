@@ -18,12 +18,12 @@ const Main = imports.ui.main;
 const Params = imports.misc.params;
 const Tweener = imports.ui.tweener;
 
-const STARTUP_ANIMATION_TIME = 0.5;
-const KEYBOARD_ANIMATION_TIME = 0.15;
-const BACKGROUND_FADE_ANIMATION_TIME = 1.0;
+var STARTUP_ANIMATION_TIME = 0.5;
+var KEYBOARD_ANIMATION_TIME = 0.15;
+var BACKGROUND_FADE_ANIMATION_TIME = 1.0;
 
-const HOT_CORNER_PRESSURE_THRESHOLD = 100; // pixels
-const HOT_CORNER_PRESSURE_TIMEOUT = 1000; // ms
+var HOT_CORNER_PRESSURE_THRESHOLD = 100; // pixels
+var HOT_CORNER_PRESSURE_TIMEOUT = 1000; // ms
 
 function isPopupMetaWindow(actor) {
     switch(actor.meta_window.get_window_type()) {
@@ -36,7 +36,7 @@ function isPopupMetaWindow(actor) {
     }
 }
 
-const MonitorConstraint = new Lang.Class({
+var MonitorConstraint = new Lang.Class({
     Name: 'MonitorConstraint',
     Extends: Clutter.Constraint,
     Properties: {'primary': GObject.ParamSpec.boolean('primary', 
@@ -129,6 +129,9 @@ const MonitorConstraint = new Lang.Class({
         if (!this._primary && this._index < 0)
             return;
 
+        if (!Main.layoutManager.primaryMonitor)
+            return;
+
         let index;
         if (this._primary)
             index = Main.layoutManager.primaryIndex;
@@ -147,7 +150,7 @@ const MonitorConstraint = new Lang.Class({
     }
 });
 
-const Monitor = new Lang.Class({
+var Monitor = new Lang.Class({
     Name: 'Monitor',
 
     _init: function(index, geometry) {
@@ -169,7 +172,7 @@ const defaultParams = {
     affectsInputRegion: true
 };
 
-const LayoutManager = new Lang.Class({
+var LayoutManager = new Lang.Class({
     Name: 'LayoutManager',
 
     _init: function () {
@@ -189,6 +192,7 @@ const LayoutManager = new Lang.Class({
         this._topActors = [];
         this._isPopupWindowVisible = false;
         this._startingUp = true;
+        this._pendingLoadBackground = false;
 
         // We don't want to paint the stage background color because either
         // the SystemBackground we create or the MetaBackgroundActor inside
@@ -323,7 +327,9 @@ const LayoutManager = new Lang.Class({
         for (let i = 0; i < nMonitors; i++)
             this.monitors.push(new Monitor(i, screen.get_monitor_geometry(i)));
 
-        if (nMonitors == 1) {
+        if (nMonitors == 0) {
+            this.primaryIndex = this.bottomIndex = -1;
+        } else if (nMonitors == 1) {
             this.primaryIndex = this.bottomIndex = 0;
         } else {
             // If there are monitors below the primary, then we need
@@ -337,8 +343,18 @@ const LayoutManager = new Lang.Class({
                 }
             }
         }
-        this.primaryMonitor = this.monitors[this.primaryIndex];
-        this.bottomMonitor = this.monitors[this.bottomIndex];
+        if (this.primaryIndex != -1) {
+            this.primaryMonitor = this.monitors[this.primaryIndex];
+            this.bottomMonitor = this.monitors[this.bottomIndex];
+
+            if (this._pendingLoadBackground) {
+                this._loadBackground();
+                this._pendingLoadBackground = false;
+            }
+        } else {
+            this.primaryMonitor = null;
+            this.bottomMonitor = null;
+        }
     },
 
     _updateHotCorners: function() {
@@ -458,6 +474,9 @@ const LayoutManager = new Lang.Class({
         this.screenShieldGroup.set_position(0, 0);
         this.screenShieldGroup.set_size(global.screen_width, global.screen_height);
 
+        if (!this.primaryMonitor)
+            return;
+
         this.panelBox.set_position(this.primaryMonitor.x, this.primaryMonitor.y);
         this.panelBox.set_size(this.primaryMonitor.width, -1);
 
@@ -479,6 +498,9 @@ const LayoutManager = new Lang.Class({
             this._rightPanelBarrier.destroy();
             this._rightPanelBarrier = null;
         }
+
+        if (!this.primaryMonitor)
+            return;
 
         if (this.panelBox.height) {
             let primary = this.primaryMonitor;
@@ -549,6 +571,10 @@ const LayoutManager = new Lang.Class({
     },
 
     _loadBackground: function() {
+        if (!this.primaryMonitor) {
+            this._pendingLoadBackground = true;
+            return;
+        }
         this._systemBackground = new Background.SystemBackground();
         this._systemBackground.actor.hide();
 
@@ -684,8 +710,10 @@ const LayoutManager = new Lang.Class({
     },
 
     showKeyboard: function () {
+        this.keyboardBox.show();
         Tweener.addTween(this.keyboardBox,
                          { anchor_y: this.keyboardBox.height,
+                           opacity: 255,
                            time: KEYBOARD_ANIMATION_TIME,
                            transition: 'easeOutQuad',
                            onComplete: this._showKeyboardComplete,
@@ -711,6 +739,7 @@ const LayoutManager = new Lang.Class({
         }
         Tweener.addTween(this.keyboardBox,
                          { anchor_y: 0,
+                           opacity: 0,
                            time: immediate ? 0 : KEYBOARD_ANIMATION_TIME,
                            transition: 'easeInQuad',
                            onComplete: this._hideKeyboardComplete,
@@ -721,6 +750,7 @@ const LayoutManager = new Lang.Class({
     },
 
     _hideKeyboardComplete: function() {
+        this.keyboardBox.hide();
         this._updateRegions();
     },
 
@@ -769,8 +799,7 @@ const LayoutManager = new Lang.Class({
     // @actor: a descendant of the chrome to begin tracking
     // @params: parameters describing how to track @actor
     //
-    // Tells the chrome to track @actor, which must be a descendant
-    // of an actor added via addChrome(). This can be used to extend the
+    // Tells the chrome to track @actor. This can be used to extend the
     // struts or input region to cover specific children.
     //
     // @params can have any of the same values as in addChrome(),
@@ -783,10 +812,9 @@ const LayoutManager = new Lang.Class({
             ancestor = ancestor.get_parent();
             index = this._findActor(ancestor);
         }
-        if (!ancestor)
-            throw new Error('actor is not a descendent of a chrome actor');
 
-        let ancestorData = this._trackedActors[index];
+        let ancestorData = ancestor ? this._trackedActors[index]
+                                    : defaultParams;
         if (!params)
             params = {};
         // We can't use Params.parse here because we want to drop
@@ -896,7 +924,10 @@ const LayoutManager = new Lang.Class({
     },
 
     findMonitorForActor: function(actor) {
-        return this.monitors[this.findIndexForActor(actor)];
+        let index = this.findIndexForActor(actor);
+        if (index >= 0 && index < this.monitors.length)
+            return this.monitors[index];
+        return null;
     },
 
     _queueUpdateRegions: function() {
@@ -966,7 +997,11 @@ const LayoutManager = new Lang.Class({
             if (actorData.affectsInputRegion && wantsInputRegion && actorData.actor.get_paint_visibility())
                 rects.push(new Meta.Rectangle({ x: x, y: y, width: w, height: h }));
 
-            if (actorData.affectsStruts) {
+            let monitor = null;
+            if (actorData.affectsStruts)
+                monitor = this.findMonitorForActor(actorData.actor);
+
+            if (monitor) {
                 // Limit struts to the size of the screen
                 let x1 = Math.max(x, 0);
                 let x2 = Math.min(x + w, global.screen_width);
@@ -983,7 +1018,6 @@ const LayoutManager = new Lang.Class({
                 // spans the width/height across the middle of the
                 // screen, then we don't create a strut for it at all.
 
-                let monitor = this.findMonitorForActor(actorData.actor);
                 let side;
                 if (x1 <= monitor.x && x2 >= monitor.x + monitor.width) {
                     if (y1 <= monitor.y)
@@ -1041,7 +1075,7 @@ Signals.addSignalMethods(LayoutManager.prototype);
 //
 // This class manages a "hot corner" that can toggle switching to
 // overview.
-const HotCorner = new Lang.Class({
+var HotCorner = new Lang.Class({
     Name: 'HotCorner',
 
     _init : function(layoutManager, monitor, x, y) {
@@ -1235,7 +1269,7 @@ const HotCorner = new Lang.Class({
     }
 });
 
-const PressureBarrier = new Lang.Class({
+var PressureBarrier = new Lang.Class({
     Name: 'PressureBarrier',
 
     _init: function(threshold, timeout, actionMode) {

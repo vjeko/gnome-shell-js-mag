@@ -12,10 +12,10 @@ const St = imports.gi.St;
 const Main = imports.ui.main;
 const Tweener = imports.ui.tweener;
 
-const ANIMATION_TIME = 0.1;
-const DISPLAY_TIMEOUT = 600;
+var ANIMATION_TIME = 0.1;
+var DISPLAY_TIMEOUT = 600;
 
-const WorkspaceSwitcherPopup = new Lang.Class({
+var WorkspaceSwitcherPopup = new Lang.Class({
     Name: 'WorkspaceSwitcherPopup',
 
     _init : function() {
@@ -31,6 +31,7 @@ const WorkspaceSwitcherPopup = new Lang.Class({
         this._itemSpacing = 0;
         this._childHeight = 0;
         this._childWidth = 0;
+        this._timeoutId = 0;
         this._list.connect('style-changed', Lang.bind(this, function() {
                                                         this._itemSpacing = this._list.get_theme_node().get_length('spacing');
                                                      }));
@@ -49,9 +50,6 @@ const WorkspaceSwitcherPopup = new Lang.Class({
         this._globalSignals = [];
         this._globalSignals.push(global.screen.connect('workspace-added', Lang.bind(this, this._redisplay)));
         this._globalSignals.push(global.screen.connect('workspace-removed', Lang.bind(this, this._redisplay)));
-
-        this._timeoutId = Mainloop.timeout_add(DISPLAY_TIMEOUT, Lang.bind(this, this._onTimeout));
-        GLib.Source.set_name_by_id(this._timeoutId, '[gnome-shell] this._onTimeout');
     },
 
     _getPreferredHeight : function (actor, forWidth, alloc) {

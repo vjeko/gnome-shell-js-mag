@@ -7,7 +7,6 @@ const Mainloop = imports.mainloop;
 const Signals = imports.signals;
 
 const FileUtils = imports.misc.fileUtils;
-const Main = imports.ui.main;
 const Params = imports.misc.params;
 
 const Config = imports.misc.config;
@@ -150,7 +149,7 @@ function listModes() {
     Mainloop.run('listModes');
 }
 
-const SessionMode = new Lang.Class({
+var SessionMode = new Lang.Class({
     Name: 'SessionMode',
 
     _init: function() {

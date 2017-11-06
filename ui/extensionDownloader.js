@@ -17,10 +17,10 @@ const ModalDialog = imports.ui.modalDialog;
 
 const _signals = ExtensionSystem._signals;
 
-const REPOSITORY_URL_BASE = 'https://extensions.gnome.org';
-const REPOSITORY_URL_DOWNLOAD = REPOSITORY_URL_BASE + '/download-extension/%s.shell-extension.zip';
-const REPOSITORY_URL_INFO     = REPOSITORY_URL_BASE + '/extension-info/';
-const REPOSITORY_URL_UPDATE   = REPOSITORY_URL_BASE + '/update-info/';
+var REPOSITORY_URL_BASE = 'https://extensions.gnome.org';
+var REPOSITORY_URL_DOWNLOAD = REPOSITORY_URL_BASE + '/download-extension/%s.shell-extension.zip';
+var REPOSITORY_URL_INFO     = REPOSITORY_URL_BASE + '/extension-info/';
+var REPOSITORY_URL_UPDATE   = REPOSITORY_URL_BASE + '/update-info/';
 
 let _httpSession;
 
@@ -130,12 +130,14 @@ function updateExtension(uuid) {
             FileUtils.recursivelyMoveDir(extensionDir, oldExtensionTmpDir);
             FileUtils.recursivelyMoveDir(newExtensionTmpDir, extensionDir);
 
-            let extension = ExtensionUtils.createExtensionObject(uuid, extensionDir, ExtensionUtils.ExtensionType.PER_USER);
+            let extension = null;
 
             try {
+                extension = ExtensionUtils.createExtensionObject(uuid, extensionDir, ExtensionUtils.ExtensionType.PER_USER);
                 ExtensionSystem.loadExtension(extension);
             } catch(e) {
-                ExtensionSystem.unloadExtension(extension);
+                if (extension)
+                    ExtensionSystem.unloadExtension(extension);
 
                 logError(e, 'Error loading extension %s'.format(uuid));
 
@@ -181,7 +183,7 @@ function checkForUpdates() {
     });
 }
 
-const InstallExtensionDialog = new Lang.Class({
+var InstallExtensionDialog = new Lang.Class({
     Name: 'InstallExtensionDialog',
     Extends: ModalDialog.ModalDialog,
 
@@ -203,7 +205,7 @@ const InstallExtensionDialog = new Lang.Class({
 
         let message = _("Download and install “%s” from extensions.gnome.org?").format(info.name);
 
-        let box = new St.BoxLayout({ style_class: 'prompt-dialog-main-layout',
+        let box = new St.BoxLayout({ style_class: 'message-dialog-main-layout',
                                      vertical: false });
         this.contentLayout.add(box);
 
@@ -211,7 +213,7 @@ const InstallExtensionDialog = new Lang.Class({
         let icon = new St.Icon({ gicon: gicon });
         box.add(icon);
 
-        let label = new St.Label({ style_class: 'prompt-dialog-headline headline',
+        let label = new St.Label({ style_class: 'message-dialog-title headline',
                                    text: message });
         box.add(label);
     },
@@ -242,9 +244,8 @@ const InstallExtensionDialog = new Lang.Class({
                 global.settings.set_strv(ExtensionSystem.ENABLED_EXTENSIONS_KEY, enabledExtensions);
             }
 
-            let extension = ExtensionUtils.createExtensionObject(uuid, dir, ExtensionUtils.ExtensionType.PER_USER);
-
             try {
+                let extension = ExtensionUtils.createExtensionObject(uuid, dir, ExtensionUtils.ExtensionType.PER_USER);
                 ExtensionSystem.loadExtension(extension);
             } catch(e) {
                 uninstallExtension(uuid);
@@ -252,7 +253,7 @@ const InstallExtensionDialog = new Lang.Class({
                 return;
             }
 
-            invocation.return_value(GLib.Variant.new('(s)', 'successful'));
+            invocation.return_value(GLib.Variant.new('(s)', ['successful']));
         }
 
         _httpSession.queue_message(message, Lang.bind(this, function(session, message) {

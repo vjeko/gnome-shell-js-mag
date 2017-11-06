@@ -2,6 +2,8 @@
 
 const Clutter = imports.gi.Clutter;
 const Gtk = imports.gi.Gtk;
+const Gio = imports.gi.Gio;
+const GObject = imports.gi.GObject;
 const Lang = imports.lang;
 const Shell = imports.gi.Shell;
 const Signals = imports.signals;
@@ -14,7 +16,7 @@ const Main = imports.ui.main;
 const Params = imports.misc.params;
 const Tweener = imports.ui.tweener;
 
-const Ornament = {
+var Ornament = {
     NONE: 0,
     DOT: 1,
     CHECK: 2,
@@ -56,7 +58,7 @@ function arrowIcon(side) {
     return arrow;
 }
 
-const PopupBaseMenuItem = new Lang.Class({
+var PopupBaseMenuItem = new Lang.Class({
     Name: 'PopupBaseMenuItem',
 
     _init: function (params) {
@@ -234,7 +236,7 @@ const PopupBaseMenuItem = new Lang.Class({
 });
 Signals.addSignalMethods(PopupBaseMenuItem.prototype);
 
-const PopupMenuItem = new Lang.Class({
+var PopupMenuItem = new Lang.Class({
     Name: 'PopupMenuItem',
     Extends: PopupBaseMenuItem,
 
@@ -247,7 +249,7 @@ const PopupMenuItem = new Lang.Class({
     }
 });
 
-const PopupSeparatorMenuItem = new Lang.Class({
+var PopupSeparatorMenuItem = new Lang.Class({
     Name: 'PopupSeparatorMenuItem',
     Extends: PopupBaseMenuItem,
 
@@ -274,7 +276,7 @@ const PopupSeparatorMenuItem = new Lang.Class({
     }
 });
 
-const Switch = new Lang.Class({
+var Switch = new Lang.Class({
     Name: 'Switch',
 
     _init: function(state) {
@@ -303,7 +305,7 @@ const Switch = new Lang.Class({
     }
 });
 
-const PopupSwitchMenuItem = new Lang.Class({
+var PopupSwitchMenuItem = new Lang.Class({
     Name: 'PopupSwitchMenuItem',
     Extends: PopupBaseMenuItem,
 
@@ -385,28 +387,32 @@ const PopupSwitchMenuItem = new Lang.Class({
     }
 });
 
-const PopupImageMenuItem = new Lang.Class({
+var PopupImageMenuItem = new Lang.Class({
     Name: 'PopupImageMenuItem',
     Extends: PopupBaseMenuItem,
 
-    _init: function (text, iconName, params) {
+    _init: function (text, icon, params) {
         this.parent(params);
 
-        this.label = new St.Label({ text: text });
-        this.actor.add_child(this.label);
         this._icon = new St.Icon({ style_class: 'popup-menu-icon' });
         this.actor.add_child(this._icon, { align: St.Align.END });
+        this.label = new St.Label({ text: text });
+        this.actor.add_child(this.label);
         this.actor.label_actor = this.label;
 
-        this.setIcon(iconName);
+        this.setIcon(icon);
     },
 
-    setIcon: function(name) {
-        this._icon.icon_name = name;
+    setIcon: function(icon) {
+        // The 'icon' parameter can be either a Gio.Icon or a string.
+        if (icon instanceof GObject.Object && GObject.type_is_a(icon, Gio.Icon))
+            this._icon.gicon = icon;
+        else
+            this._icon.icon_name = icon;
     }
 });
 
-const PopupMenuBase = new Lang.Class({
+var PopupMenuBase = new Lang.Class({
     Name: 'PopupMenuBase',
     Abstract: true,
 
@@ -459,10 +465,16 @@ const PopupMenuBase = new Lang.Class({
 
     _sessionUpdated: function() {
         this._setSettingsVisibility(Main.sessionMode.allowSettings);
+        this.close();
     },
 
-    addAction: function(title, callback) {
-        let menuItem = new PopupMenuItem(title);
+    addAction: function(title, callback, icon) {
+        let menuItem;
+        if (icon != undefined)
+            menuItem = new PopupImageMenuItem(title, icon);
+        else
+            menuItem = new PopupMenuItem(title);
+
         this.addMenuItem(menuItem);
         menuItem.connect('activate', Lang.bind(this, function (menuItem, event) {
             callback(event);
@@ -605,6 +617,24 @@ const PopupMenuBase = new Lang.Class({
         menuItem.actor.show();
     },
 
+    moveMenuItem: function(menuItem, position) {
+        let items = this._getMenuItems();
+        let i = 0;
+
+        while (i < items.length && position > 0) {
+                if (items[i] != menuItem)
+                        position--;
+                i++;
+        }
+
+        if (i < items.length) {
+                if (items[i] != menuItem)
+                        this.box.set_child_below_sibling(menuItem.actor, items[i].actor);
+        } else {
+                this.box.set_child_above_sibling(menuItem.actor, null);
+        }
+    },
+
     addMenuItem: function(menuItem, position) {
         let before_item = null;
         if (position == undefined) {
@@ -728,7 +758,7 @@ const PopupMenuBase = new Lang.Class({
 });
 Signals.addSignalMethods(PopupMenuBase.prototype);
 
-const PopupMenu = new Lang.Class({
+var PopupMenu = new Lang.Class({
     Name: 'PopupMenu',
     Extends: PopupMenuBase,
 
@@ -767,6 +797,11 @@ const PopupMenu = new Lang.Class({
     },
 
     _onKeyPress: function(actor, event) {
+        // Disable toggling the menu by keyboard
+        // when it cannot be toggled by pointer
+        if (!actor.reactive)
+            return Clutter.EVENT_PROPAGATE;
+
         let navKey;
         switch (this._boxPointer.arrowSide) {
             case St.Side.TOP:
@@ -859,7 +894,7 @@ const PopupMenu = new Lang.Class({
     }
 });
 
-const PopupDummyMenu = new Lang.Class({
+var PopupDummyMenu = new Lang.Class({
     Name: 'PopupDummyMenu',
 
     _init: function(sourceActor) {
@@ -881,7 +916,7 @@ const PopupDummyMenu = new Lang.Class({
 });
 Signals.addSignalMethods(PopupDummyMenu.prototype);
 
-const PopupSubMenu = new Lang.Class({
+var PopupSubMenu = new Lang.Class({
     Name: 'PopupSubMenu',
     Extends: PopupMenuBase,
 
@@ -1029,7 +1064,7 @@ const PopupSubMenu = new Lang.Class({
  * can add it to another menu), but is completely transparent
  * to the user
  */
-const PopupMenuSection = new Lang.Class({
+var PopupMenuSection = new Lang.Class({
     Name: 'PopupMenuSection',
     Extends: PopupMenuBase,
 
@@ -1047,7 +1082,7 @@ const PopupMenuSection = new Lang.Class({
     close: function() { this.emit('open-state-changed', false); },
 });
 
-const PopupSubMenuMenuItem = new Lang.Class({
+var PopupSubMenuMenuItem = new Lang.Class({
     Name: 'PopupSubMenuMenuItem',
     Extends: PopupBaseMenuItem,
 
@@ -1172,7 +1207,7 @@ const PopupSubMenuMenuItem = new Lang.Class({
 /* Basic implementation of a menu manager.
  * Call addMenu to add menus
  */
-const PopupMenuManager = new Lang.Class({
+var PopupMenuManager = new Lang.Class({
     Name: 'PopupMenuManager',
 
     _init: function(owner, grabParams) {

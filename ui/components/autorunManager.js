@@ -7,7 +7,6 @@ const St = imports.gi.St;
 const GnomeSession = imports.misc.gnomeSession;
 const Main = imports.ui.main;
 const MessageTray = imports.ui.messageTray;
-const ShellMountOperation = imports.ui.shellMountOperation;
 
 // GSettings keys
 const SETTINGS_SCHEMA = 'org.gnome.desktop.media-handling';
@@ -16,7 +15,7 @@ const SETTING_START_APP = 'autorun-x-content-start-app';
 const SETTING_IGNORE = 'autorun-x-content-ignore';
 const SETTING_OPEN_FOLDER = 'autorun-x-content-open-folder';
 
-const AutorunSetting = {
+var AutorunSetting = {
     RUN: 0,
     IGNORE: 1,
     FILES: 2,
@@ -64,7 +63,7 @@ function startAppForMount(app, mount) {
 
     try {
         retval = app.launch(files, 
-                            global.create_app_launch_context(0, -1))
+                            global.create_app_launch_context(0, -1));
     } catch (e) {
         log('Unable to launch the application ' + app.get_name()
             + ': ' + e.toString());
@@ -91,7 +90,7 @@ function HotplugSniffer() {
                                    '/org/gnome/Shell/HotplugSniffer');
 }
 
-const ContentTypeDiscoverer = new Lang.Class({
+var ContentTypeDiscoverer = new Lang.Class({
     Name: 'ContentTypeDiscoverer',
 
     _init: function(callback) {
@@ -160,7 +159,7 @@ const ContentTypeDiscoverer = new Lang.Class({
     }
 });
 
-const AutorunManager = new Lang.Class({
+var AutorunManager = new Lang.Class({
     Name: 'AutorunManager',
 
     _init: function() {
@@ -197,7 +196,7 @@ const AutorunManager = new Lang.Class({
     }
 });
 
-const AutorunDispatcher = new Lang.Class({
+var AutorunDispatcher = new Lang.Class({
     Name: 'AutorunDispatcher',
 
     _init: function(manager) {
@@ -256,7 +255,11 @@ const AutorunDispatcher = new Lang.Class({
         if (!shouldAutorunMount(mount))
             return;
 
-        let setting = this._getAutorunSettingForType(contentTypes[0]);
+        let setting;
+        if (contentTypes.length > 0)
+            setting = this._getAutorunSettingForType(contentTypes[0]);
+        else
+            setting = AutorunSetting.ASK;
 
         // check at the settings for the first content type
         // to see whether we should ask
@@ -293,7 +296,7 @@ const AutorunDispatcher = new Lang.Class({
     }
 });
 
-const AutorunSource = new Lang.Class({
+var AutorunSource = new Lang.Class({
     Name: 'AutorunSource',
     Extends: MessageTray.Source,
 
@@ -320,7 +323,7 @@ const AutorunSource = new Lang.Class({
     }
 });
 
-const AutorunNotification = new Lang.Class({
+var AutorunNotification = new Lang.Class({
     Name: 'AutorunNotification',
     Extends: MessageTray.Notification,
 
@@ -379,4 +382,4 @@ const AutorunNotification = new Lang.Class({
     }
 });
 
-const Component = AutorunManager;
+var Component = AutorunManager;

@@ -21,7 +21,7 @@ const KEY_MOUSE_KEYS_ENABLED        = 'mousekeys-enable';
 
 const APPLICATIONS_SCHEMA           = 'org.gnome.desktop.a11y.applications';
 
-const DPI_FACTOR_LARGE              = 1.25;
+var DPI_FACTOR_LARGE              = 1.25;
 
 const WM_SCHEMA                     = 'org.gnome.desktop.wm.preferences';
 const KEY_VISUAL_BELL               = 'visual-bell';
@@ -34,7 +34,7 @@ const KEY_TEXT_SCALING_FACTOR       = 'text-scaling-factor';
 
 const HIGH_CONTRAST_THEME           = 'HighContrast';
 
-const ATIndicator = new Lang.Class({
+var ATIndicator = new Lang.Class({
     Name: 'ATIndicator',
     Extends: PanelMenu.Button,
 
@@ -102,8 +102,8 @@ const ATIndicator = new Lang.Class({
         if (this._syncMenuVisibilityIdle)
             return;
 
-        this._syncMenuVisbilityIdle = Mainloop.idle_add(Lang.bind(this, this._syncMenuVisibility));
-        GLib.Source.set_name_by_id(this._syncMenuVisbilityIdle, '[gnome-shell] this._syncMenuVisibility');
+        this._syncMenuVisibilityIdle = Mainloop.idle_add(Lang.bind(this, this._syncMenuVisibility));
+        GLib.Source.set_name_by_id(this._syncMenuVisibilityIdle, '[gnome-shell] this._syncMenuVisibility');
     },
 
     _buildItemExtended: function(string, initial_value, writable, on_set) {
@@ -213,7 +213,7 @@ const ATIndicator = new Lang.Class({
     }
 });
 
-const ATGreeterIndicator = new Lang.Class({
+var ATGreeterIndicator = new Lang.Class({
     Name: 'ATGreeterIndicator',
     Extends: ATIndicator,
 

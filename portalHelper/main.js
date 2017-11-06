@@ -19,7 +19,15 @@ const PortalHelperResult = {
     RECHECK: 2
 };
 
+const PortalHelperSecurityLevel = {
+    NOT_YET_DETERMINED: 0,
+    SECURE: 1,
+    INSECURE: 2
+};
+
 const INACTIVITY_TIMEOUT = 30000; //ms
+const CONNECTIVITY_CHECK_HOST = 'nmcheck.gnome.org';
+const CONNECTIVITY_CHECK_URI = 'http://' + CONNECTIVITY_CHECK_HOST;
 const CONNECTIVITY_RECHECK_RATELIMIT_TIMEOUT = 30 * GLib.USEC_PER_SEC;
 
 const HelperDBusInterface = '<node> \
@@ -42,15 +50,86 @@ const HelperDBusInterface = '<node> \
 </interface> \
 </node>';
 
-const PortalWindow = new Lang.Class({
+var PortalHeaderBar = new Lang.Class({
+    Name: 'PortalHeaderBar',
+    Extends: Gtk.HeaderBar,
+
+    _init: function() {
+        this.parent({ show_close_button: true });
+
+        // See ephy-title-box.c in epiphany for the layout
+        let vbox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL,
+                                 spacing: 0 });
+        this.set_custom_title(vbox);
+
+        /* TRANSLATORS: this is the title of the wifi captive portal login window */
+        let titleLabel = new Gtk.Label({ label: _("Hotspot Login"),
+                                         wrap: false,
+                                         single_line_mode: true,
+                                         ellipsize: Pango.EllipsizeMode.END });
+        titleLabel.get_style_context().add_class('title');
+        vbox.add(titleLabel);
+
+        let hbox = new Gtk.Box({ orientation: Gtk.Orientation.HORIZONTAL,
+                                 spacing: 4,
+                                 halign: Gtk.Align.CENTER,
+                                 valign: Gtk.Align.BASELINE });
+        hbox.get_style_context().add_class('subtitle');
+        vbox.add(hbox);
+
+        this._lockImage = new Gtk.Image({ icon_size: Gtk.IconSize.MENU,
+                                          valign: Gtk.Align.BASELINE });
+        hbox.add(this._lockImage);
+
+        this.subtitleLabel = new Gtk.Label({ wrap: false,
+                                             single_line_mode: true,
+                                             ellipsize: Pango.EllipsizeMode.END,
+                                             valign: Gtk.Align.BASELINE,
+                                             selectable: true});
+        this.subtitleLabel.get_style_context().add_class('subtitle');
+        hbox.add(this.subtitleLabel);
+
+        vbox.show_all();
+    },
+
+    setSubtitle: function(label) {
+        this.subtitleLabel.set_text(label);
+    },
+
+    setSecurityIcon: function(securityLevel) {
+        switch (securityLevel) {
+        case PortalHelperSecurityLevel.NOT_YET_DETERMINED:
+            this._lockImage.hide();
+            break;
+        case PortalHelperSecurityLevel.SECURE:
+            this._lockImage.show();
+            this._lockImage.set_from_icon_name("channel-secure-symbolic", Gtk.IconSize.MENU);
+            this._lockImage.set_tooltip_text(null);
+            break;
+        case PortalHelperSecurityLevel.INSECURE:
+            this._lockImage.show();
+            this._lockImage.set_from_icon_name("channel-insecure-symbolic", Gtk.IconSize.MENU);
+            this._lockImage.set_tooltip_text(_('Your connection to this hotspot login is not secure. Passwords or other information you enter on this page can be viewed by people nearby.'));
+            break;
+        }
+    },
+});
+
+var PortalWindow = new Lang.Class({
     Name: 'PortalWindow',
     Extends: Gtk.ApplicationWindow,
 
     _init: function(application, url, timestamp, doneCallback) {
         this.parent({ application: application });
 
+        this.connect('delete-event', Lang.bind(this, this.destroyWindow));
+        this._headerBar = new PortalHeaderBar();
+        this._headerBar.setSecurityIcon(PortalHelperSecurityLevel.NOT_YET_DETERMINED);
+        this.set_titlebar(this._headerBar);
+        this._headerBar.show();
+
         if (!url) {
-            url = 'http://nmcheck.gnome.org';
+            url = CONNECTIVITY_CHECK_URI;
             this._originalUrlWasGnome = true;
         } else {
             this._originalUrlWasGnome = false;
@@ -62,28 +141,38 @@ const PortalWindow = new Lang.Class({
         this._lastRecheck = 0;
         this._recheckAtExit = false;
 
-        this._webView = new WebKit.WebView();
+        this._webContext = WebKit.WebContext.new_ephemeral();
+        this._webContext.set_cache_model(WebKit.CacheModel.DOCUMENT_VIEWER);
+        this._webContext.set_network_proxy_settings(WebKit.NetworkProxyMode.NO_PROXY, null);
+
+        this._webView = WebKit.WebView.new_with_context(this._webContext);
         this._webView.connect('decide-policy', Lang.bind(this, this._onDecidePolicy));
+        this._webView.connect('load-changed', Lang.bind(this, this._onLoadChanged));
+        this._webView.connect('insecure-content-detected', Lang.bind(this, this._onInsecureContentDetected));
+        this._webView.connect('load-failed-with-tls-errors', Lang.bind(this, this._onLoadFailedWithTlsErrors));
         this._webView.load_uri(url);
-        this._webView.connect('notify::title', Lang.bind(this, this._syncTitle));
-        this._syncTitle();
+        this._webView.connect('notify::uri', Lang.bind(this, this._syncUri));
+        this._syncUri();
 
         this.add(this._webView);
         this._webView.show();
+        this.set_size_request(600, 450);
         this.maximize();
         this.present_with_time(timestamp);
+
+        this.application.set_accels_for_action('app.quit', ['<Primary>q', '<Primary>w']);
     },
 
-    _syncTitle: function() {
-        let title = this._webView.title;
+    destroyWindow: function() {
+        this.destroy();
+    },
 
-        if (title) {
-            this.title = title;
-        } else {
-            /* TRANSLATORS: this is the title of the wifi captive portal login
-             * window, until we know the title of the actual login page */
-            this.title = _("Web Authentication Redirect");
-        }
+    _syncUri: function() {
+        let uri = this._webView.uri;
+        if (uri)
+            this._headerBar.setSubtitle(GLib.uri_unescape_string(uri, null));
+        else
+            this._headerBar.setSubtitle('');
     },
 
     refresh: function() {
@@ -99,8 +188,46 @@ const PortalWindow = new Lang.Class({
         return false;
     },
 
+    _onLoadChanged: function(view, loadEvent) {
+        if (loadEvent == WebKit.LoadEvent.STARTED) {
+            this._headerBar.setSecurityIcon(PortalHelperSecurityLevel.NOT_YET_DETERMINED);
+        } else if (loadEvent == WebKit.LoadEvent.COMMITTED) {
+            let tlsInfo = this._webView.get_tls_info();
+            let ret = tlsInfo[0];
+            let flags = tlsInfo[2];
+            if (ret && flags == 0)
+                this._headerBar.setSecurityIcon(PortalHelperSecurityLevel.SECURE);
+            else
+                this._headerBar.setSecurityIcon(PortalHelperSecurityLevel.INSECURE);
+        }
+    },
+
+    _onInsecureContentDetected: function () {
+        this._headerBar.setSecurityIcon(PortalHelperSecurityLevel.INSECURE);
+    },
+
+    _onLoadFailedWithTlsErrors: function (view, failingURI, certificate, errors) {
+        this._headerBar.setSecurityIcon(PortalHelperSecurityLevel.INSECURE);
+        let uri = new Soup.URI(failingURI);
+        this._webContext.allow_tls_certificate_for_host(certificate, uri.get_host());
+        this._webView.load_uri(failingURI);
+        return true;
+    },
+
     _onDecidePolicy: function(view, decision, type) {
         if (type == WebKit.PolicyDecisionType.NEW_WINDOW_ACTION) {
+            let navigationAction = decision.get_navigation_action();
+            if (navigationAction.is_user_gesture()) {
+                // Even though the portal asks for a new window,
+                // perform the navigation in the current one. Some
+                // portals open a window as their last login step and
+                // ignoring that window causes them to not let the
+                // user go through. We don't risk popups taking over
+                // the page because we check that the navigation is
+                // user initiated.
+                this._webView.load_request(navigationAction.get_request());
+            }
+
             decision.ignore();
             return true;
         }
@@ -112,12 +239,12 @@ const PortalWindow = new Lang.Class({
         let uri = new Soup.URI(request.get_uri());
 
         if (!uri.host_equal(this._uri) && this._originalUrlWasGnome) {
-            if (uri.get_host() == 'nmcheck.gnome.org' && this._everSeenRedirect) {
+            if (uri.get_host() == CONNECTIVITY_CHECK_HOST && this._everSeenRedirect) {
                 // Yay, we got to gnome!
                 decision.ignore();
                 this._doneCallback(PortalHelperResult.COMPLETED);
                 return true;
-            } else if (uri.get_host() != 'nmcheck.gnome.org') {
+            } else if (uri.get_host() != CONNECTIVITY_CHECK_HOST) {
                 this._everSeenRedirect = true;
             }
         }
@@ -155,7 +282,7 @@ const PortalWindow = new Lang.Class({
     },
 });
 
-const WebPortalHelper = new Lang.Class({
+var WebPortalHelper = new Lang.Class({
     Name: 'WebPortalHelper',
     Extends: Gtk.Application,
 
@@ -166,6 +293,10 @@ const WebPortalHelper = new Lang.Class({
 
         this._dbusImpl = Gio.DBusExportedObject.wrapJSObject(HelperDBusInterface, this);
         this._queue = [];
+
+        let action = new Gio.SimpleAction({ name: 'quit' });
+        action.connect('activate', () => { this.active_window.destroyWindow(); });
+        this.add_action(action);
     },
 
     vfunc_dbus_register: function(connection, path) {
@@ -197,7 +328,7 @@ const WebPortalHelper = new Lang.Class({
 
             if (obj.connection == connection) {
                 if (obj.window)
-                    obj.window.destroy();
+                    obj.window.destroyWindow();
                 this._queue.splice(i, 1);
                 break;
             }
@@ -226,7 +357,7 @@ const WebPortalHelper = new Lang.Class({
         if (top.window != null)
             return;
 
-        top.window = new PortalWindow(this, top.uri, top.timestamp, Lang.bind(this, function(result) {
+        top.window = new PortalWindow(this, top.url, top.timestamp, Lang.bind(this, function(result) {
             this._dbusImpl.emit_signal('Done', new GLib.Variant('(ou)', [top.connection, result]));
         }));
     },
@@ -238,6 +369,11 @@ function initEnvironment() {
 
 function main(argv) {
     initEnvironment();
+
+    if (!WebKit.WebContext.new_ephemeral) {
+        log('WebKitGTK 2.16 is required for the portal-helper, see https://bugzilla.gnome.org/show_bug.cgi?id=780453');
+        return 1;
+    }
 
     Gettext.bindtextdomain(Config.GETTEXT_PACKAGE, Config.LOCALEDIR);
     Gettext.textdomain(Config.GETTEXT_PACKAGE);

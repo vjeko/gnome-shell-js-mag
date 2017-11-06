@@ -102,11 +102,12 @@ const Lang = imports.lang;
 const Meta = imports.gi.Meta;
 const Signals = imports.signals;
 
+const LoginManager = imports.misc.loginManager;
 const Main = imports.ui.main;
 const Params = imports.misc.params;
 const Tweener = imports.ui.tweener;
 
-const DEFAULT_BACKGROUND_COLOR = Clutter.Color.from_pixel(0x2e3436ff);
+var DEFAULT_BACKGROUND_COLOR = Clutter.Color.from_pixel(0x2e3436ff);
 
 const BACKGROUND_SCHEMA = 'org.gnome.desktop.background';
 const PRIMARY_COLOR_KEY = 'primary-color';
@@ -116,14 +117,14 @@ const BACKGROUND_STYLE_KEY = 'picture-options';
 const PICTURE_OPACITY_KEY = 'picture-opacity';
 const PICTURE_URI_KEY = 'picture-uri';
 
-const FADE_ANIMATION_TIME = 1.0;
+var FADE_ANIMATION_TIME = 1.0;
 
 // These parameters affect how often we redraw.
 // The first is how different (percent crossfaded) the slide show
 // has to look before redrawing and the second is the minimum
 // frequency (in seconds) we're willing to wake up
-const ANIMATION_OPACITY_STEP_INCREMENT = 4.0;
-const ANIMATION_MIN_WAKEUP_INTERVAL = 1.0;
+var ANIMATION_OPACITY_STEP_INCREMENT = 4.0;
+var ANIMATION_MIN_WAKEUP_INTERVAL = 1.0;
 
 let _backgroundCache = null;
 
@@ -137,11 +138,10 @@ function _fileEqual0(file1, file2) {
     return file1.equal(file2);
 }
 
-const BackgroundCache = new Lang.Class({
+var BackgroundCache = new Lang.Class({
     Name: 'BackgroundCache',
 
     _init: function() {
-        this._pendingFileLoads = [];
         this._fileMonitors = {};
         this._backgroundSources = {};
         this._animations = {};
@@ -154,8 +154,12 @@ const BackgroundCache = new Lang.Class({
 
         let monitor = file.monitor(Gio.FileMonitorFlags.NONE, null);
         monitor.connect('changed',
-                        Lang.bind(this, function() {
-                            this.emit('file-changed', file);
+                        Lang.bind(this, function(obj, file, otherFile, eventType) {
+                            // Ignore CHANGED and CREATED events, since in both cases
+                            // we'll get a CHANGES_DONE_HINT event when done.
+                            if (eventType != Gio.FileMonitorEvent.CHANGED &&
+                                eventType != Gio.FileMonitorEvent.CREATED)
+                                this.emit('file-changed', file);
                         }));
 
         this._fileMonitors[key] = monitor;
@@ -166,7 +170,8 @@ const BackgroundCache = new Lang.Class({
                                         settingsSchema: null,
                                         onLoaded: null });
 
-        if (this._animations[params.settingsSchema] && _fileEqual0(this._animationFile, params.file)) {
+        let animation = this._animations[params.settingsSchema];
+        if (animation && _fileEqual0(animation.file, params.file)) {
             if (params.onLoaded) {
                 let id = GLib.idle_add(GLib.PRIORITY_DEFAULT, Lang.bind(this, function() {
                     params.onLoaded(this._animations[params.settingsSchema]);
@@ -177,7 +182,7 @@ const BackgroundCache = new Lang.Class({
             return;
         }
 
-        let animation = new Animation({ file: params.file });
+        animation = new Animation({ file: params.file });
 
         animation.load(Lang.bind(this, function() {
                            this._animations[params.settingsSchema] = animation;
@@ -225,7 +230,7 @@ function getBackgroundCache() {
     return _backgroundCache;
 }
 
-const Background = new Lang.Class({
+var Background = new Lang.Class({
     Name: 'Background',
 
     _init: function(params) {
@@ -254,6 +259,14 @@ const Background = new Lang.Class({
                     this._loadAnimation(this._animation.file);
             }));
 
+        let loginManager = LoginManager.getLoginManager();
+        this._prepareForSleepId = loginManager.connect('prepare-for-sleep',
+            (lm, aboutToSuspend) => {
+                if (aboutToSuspend)
+                    return;
+                this._refreshAnimation();
+            });
+
         this._settingsChangedSignalId = this._settings.connect('changed', Lang.bind(this, function() {
                                             this.emit('changed');
                                         }));
@@ -276,16 +289,26 @@ const Background = new Lang.Class({
             this._clock.disconnect(this._timezoneChangedId);
         this._timezoneChangedId = 0;
 
+        if (this._prepareForSleepId != 0)
+            LoginManager.getLoginManager().disconnect(this._prepareForSleepId);
+        this._prepareForSleepId = 0;
+
         if (this._settingsChangedSignalId != 0)
             this._settings.disconnect(this._settingsChangedSignalId);
         this._settingsChangedSignalId = 0;
     },
 
     updateResolution: function() {
-        if (this._animation) {
-            this._removeAnimationTimeout();
-            this._updateAnimation();
-        }
+        if (this._animation)
+            this._refreshAnimation();
+    },
+
+    _refreshAnimation: function() {
+        if (!this._animation)
+            return;
+
+        this._removeAnimationTimeout();
+        this._updateAnimation();
     },
 
     _setLoaded: function() {
@@ -363,11 +386,9 @@ const Background = new Lang.Class({
 
         let cache = Meta.BackgroundImageCache.get_default();
         let numPendingImages = files.length;
-        let images = [];
         for (let i = 0; i < files.length; i++) {
             this._watchFile(files[i]);
             let image = cache.load(files[i]);
-            images.push(image);
             if (image.is_loaded()) {
                 numPendingImages--;
                 if (numPendingImages == 0)
@@ -471,7 +492,7 @@ Signals.addSignalMethods(Background.prototype);
 
 let _systemBackground;
 
-const SystemBackground = new Lang.Class({
+var SystemBackground = new Lang.Class({
     Name: 'SystemBackground',
 
     _init: function() {
@@ -508,7 +529,7 @@ const SystemBackground = new Lang.Class({
 });
 Signals.addSignalMethods(SystemBackground.prototype);
 
-const BackgroundSource = new Lang.Class({
+var BackgroundSource = new Lang.Class({
     Name: 'BackgroundSource',
 
     _init: function(layoutManager, settingsSchema) {
@@ -596,7 +617,7 @@ const BackgroundSource = new Lang.Class({
     }
 });
 
-const Animation = new Lang.Class({
+var Animation = new Lang.Class({
     Name: 'Animation',
 
     _init: function(params) {
@@ -644,7 +665,7 @@ const Animation = new Lang.Class({
 });
 Signals.addSignalMethods(Animation.prototype);
 
-const BackgroundManager = new Lang.Class({
+var BackgroundManager = new Lang.Class({
     Name: 'BackgroundManager',
 
     _init: function(params) {

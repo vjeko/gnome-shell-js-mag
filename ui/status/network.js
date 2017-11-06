@@ -40,12 +40,14 @@ const NMAccessPointSecurity = {
     WPA2_ENT: 6
 };
 
+var MAX_DEVICE_ITEMS = 4;
+
 // small optimization, to avoid using [] all the time
 const NM80211Mode = NetworkManager['80211Mode'];
 const NM80211ApFlags = NetworkManager['80211ApFlags'];
 const NM80211ApSecurityFlags = NetworkManager['80211ApSecurityFlags'];
 
-const PortalHelperResult = {
+var PortalHelperResult = {
     CANCELLED: 0,
     COMPLETED: 1,
     RECHECK: 2
@@ -113,18 +115,7 @@ function ensureActiveConnectionProps(active, settings) {
     }
 }
 
-function createSettingsAction(label, device) {
-    let item = new PopupMenu.PopupMenuItem(label);
-
-    item.connect('activate', function() {
-        Util.spawnApp(['gnome-control-center', 'network', 'show-device',
-                       device.get_path()]);
-    });
-
-    return item;
-}
-
-const NMConnectionItem = new Lang.Class({
+var NMConnectionItem = new Lang.Class({
     Name: 'NMConnectionItem',
 
     _init: function(section, connection) {
@@ -218,7 +209,7 @@ const NMConnectionItem = new Lang.Class({
 });
 Signals.addSignalMethods(NMConnectionItem.prototype);
 
-const NMConnectionSection = new Lang.Class({
+var NMConnectionSection = new Lang.Class({
     Name: 'NMConnectionSection',
     Abstract: true,
 
@@ -297,9 +288,20 @@ const NMConnectionSection = new Lang.Class({
 
         let item = this._connectionItems.get(connection.get_uuid());
         if (item)
-            item.updateForConnection(connection);
+            this._updateForConnection(item, connection);
         else
             this._addConnection(connection);
+    },
+
+    _updateForConnection: function(item, connection) {
+        let pos = this._connections.indexOf(connection);
+
+        this._connections.splice(pos, 1);
+        pos = Util.insertSorted(this._connections, connection, Lang.bind(this, this._connectionSortFunction));
+        this._labelSection.moveMenuItem(item.labelItem, pos);
+        this._radioSection.moveMenuItem(item.radioItem, pos);
+
+        item.updateForConnection(connection);
     },
 
     _addConnection: function(connection) {
@@ -339,7 +341,7 @@ const NMConnectionSection = new Lang.Class({
 });
 Signals.addSignalMethods(NMConnectionSection.prototype);
 
-const NMConnectionDevice = new Lang.Class({
+var NMConnectionDevice = new Lang.Class({
     Name: 'NMConnectionDevice',
     Extends: NMConnectionSection,
     Abstract: true,
@@ -493,7 +495,7 @@ const NMConnectionDevice = new Lang.Class({
     },
 });
 
-const NMDeviceWired = new Lang.Class({
+var NMDeviceWired = new Lang.Class({
     Name: 'NMDeviceWired',
     Extends: NMConnectionDevice,
     category: NMConnectionCategory.WIRED,
@@ -501,7 +503,7 @@ const NMDeviceWired = new Lang.Class({
     _init: function(client, device, settings) {
         this.parent(client, device, settings);
 
-        this.item.menu.addMenuItem(createSettingsAction(_("Wired Settings"), device));
+        this.item.menu.addSettingsAction(_("Wired Settings"), 'gnome-network-panel.desktop');
     },
 
     _hasCarrier: function() {
@@ -535,7 +537,7 @@ const NMDeviceWired = new Lang.Class({
     }
 });
 
-const NMDeviceModem = new Lang.Class({
+var NMDeviceModem = new Lang.Class({
     Name: 'NMDeviceModem',
     Extends: NMConnectionDevice,
     category: NMConnectionCategory.WWAN,
@@ -543,7 +545,7 @@ const NMDeviceModem = new Lang.Class({
     _init: function(client, device, settings) {
         this.parent(client, device, settings);
 
-        this.item.menu.addMenuItem(createSettingsAction(_("Mobile Broadband Settings"), device));
+        this.item.menu.addSettingsAction(_("Mobile Broadband Settings"), 'gnome-network-panel.desktop');
 
         this._mobileDevice = null;
 
@@ -614,7 +616,7 @@ const NMDeviceModem = new Lang.Class({
     },
 });
 
-const NMDeviceBluetooth = new Lang.Class({
+var NMDeviceBluetooth = new Lang.Class({
     Name: 'NMDeviceBluetooth',
     Extends: NMConnectionDevice,
     category: NMConnectionCategory.WWAN,
@@ -622,7 +624,7 @@ const NMDeviceBluetooth = new Lang.Class({
     _init: function(client, device, settings) {
         this.parent(client, device, settings);
 
-        this.item.menu.addMenuItem(createSettingsAction(_("Bluetooth Settings"), device));
+        this.item.menu.addSettingsAction(_("Bluetooth Settings"), 'gnome-network-panel.desktop');
     },
 
     _getDescription: function() {
@@ -648,7 +650,7 @@ const NMDeviceBluetooth = new Lang.Class({
     }
 });
 
-const NMWirelessDialogItem = new Lang.Class({
+var NMWirelessDialogItem = new Lang.Class({
     Name: 'NMWirelessDialogItem',
 
     _init: function(network) {
@@ -713,7 +715,7 @@ const NMWirelessDialogItem = new Lang.Class({
 });
 Signals.addSignalMethods(NMWirelessDialogItem.prototype);
 
-const NMWirelessDialog = new Lang.Class({
+var NMWirelessDialog = new Lang.Class({
     Name: 'NMWirelessDialog',
     Extends: ModalDialog.ModalDialog,
 
@@ -756,6 +758,14 @@ const NMWirelessDialog = new Lang.Class({
         this._scanTimeoutId = Mainloop.timeout_add_seconds(15, Lang.bind(this, this._onScanTimeout));
         GLib.Source.set_name_by_id(this._scanTimeoutId, '[gnome-shell] this._onScanTimeout');
         this._onScanTimeout();
+
+        let id = Main.sessionMode.connect('updated', () => {
+            if (Main.sessionMode.allowSettings)
+                return;
+
+            Main.sessionMode.disconnect(id);
+            this.close();
+        });
     },
 
     destroy: function() {
@@ -941,7 +951,7 @@ const NMWirelessDialog = new Lang.Class({
                 || (accessPoints[0]._secType == NMAccessPointSecurity.WPA_ENT)) {
                 // 802.1x-enabled APs require further configuration, so they're
                 // handled in gnome-control-center
-                Util.spawn(['gnome-control-center', 'network', 'connect-8021x-wifi',
+                Util.spawn(['gnome-control-center', 'wifi', 'connect-8021x-wifi',
                             this._device.get_path(), accessPoints[0].dbus_path]);
             } else {
                 let connection = new NetworkManager.Connection();
@@ -1166,7 +1176,7 @@ const NMWirelessDialog = new Lang.Class({
     },
 });
 
-const NMDeviceWireless = new Lang.Class({
+var NMDeviceWireless = new Lang.Class({
     Name: 'NMDeviceWireless',
     category: NMConnectionCategory.WIRELESS,
 
@@ -1184,7 +1194,7 @@ const NMDeviceWireless = new Lang.Class({
         this._toggleItem.connect('activate', Lang.bind(this, this._toggleWifi));
         this.item.menu.addMenuItem(this._toggleItem);
 
-        this.item.menu.addMenuItem(createSettingsAction(_("Wi-Fi Settings"), device));
+        this.item.menu.addSettingsAction(_("Wi-Fi Settings"), 'gnome-wifi-panel.desktop');
 
         this._wirelessEnabledChangedId = this._client.connect('notify::wireless-enabled', Lang.bind(this, this._sync));
         this._wirelessHwEnabledChangedId = this._client.connect('notify::wireless-hardware-enabled', Lang.bind(this, this._sync));
@@ -1341,7 +1351,11 @@ const NMDeviceWireless = new Lang.Class({
         if (!this._device.active_connection)
             return false;
 
-        let connection = this._settings.get_connection_by_path(this._device.active_connection.connection);
+        let connectionPath = this._device.active_connection.connection;
+        if (!connectionPath)
+            return false;
+
+        let connection = this._settings.get_connection_by_path(connectionPath);
         if (!connection)
             return false;
 
@@ -1380,7 +1394,7 @@ const NMDeviceWireless = new Lang.Class({
 });
 Signals.addSignalMethods(NMDeviceWireless.prototype);
 
-const NMVPNConnectionItem = new Lang.Class({
+var NMVPNConnectionItem = new Lang.Class({
     Name: 'NMVPNConnectionItem',
     Extends: NMConnectionItem,
 
@@ -1418,7 +1432,7 @@ const NMVPNConnectionItem = new Lang.Class({
         case NetworkManager.VPNConnectionState.PREPARE:
         case NetworkManager.VPNConnectionState.CONNECT:
         case NetworkManager.VPNConnectionState.IP_CONFIG_GET:
-            return _("connecting...");
+            return _("connecting…");
         case NetworkManager.VPNConnectionState.NEED_AUTH:
             /* Translators: this is for network connections that require some kind of key or password */
             return _("authentication required");
@@ -1469,7 +1483,7 @@ const NMVPNConnectionItem = new Lang.Class({
     },
 });
 
-const NMVPNSection = new Lang.Class({
+var NMVPNSection = new Lang.Class({
     Name: 'NMVPNSection',
     Extends: NMConnectionSection,
     category: NMConnectionCategory.VPN,
@@ -1477,36 +1491,7 @@ const NMVPNSection = new Lang.Class({
     _init: function(client) {
         this.parent(client);
 
-        this._vpnSettings = new PopupMenu.PopupMenuItem('');
-        this.item.menu.addMenuItem(this._vpnSettings);
-        this._vpnSettings.connect('activate', Lang.bind(this, this._onSettingsActivate));
-
-        this._sync();
-    },
-
-    _sync: function() {
-        let nItems = this._connectionItems.size;
-        this.item.actor.visible = (nItems > 0);
-
-        if (nItems > 1)
-            this._vpnSettings.label.text = _("Network Settings");
-        else
-            this._vpnSettings.label.text = _("VPN Settings");
-
-        this.parent();
-    },
-
-    _onSettingsActivate: function() {
-        let nItems = this._connectionItems.size;
-        if (nItems > 1) {
-            let appSys = Shell.AppSystem.get_default();
-            let app = appSys.lookup_app('gnome-network-panel.desktop');
-            app.launch(0, -1);
-        } else {
-            let connection = this._connections[0];
-            Util.spawnApp(['gnome-control-center', 'network', 'show-device',
-                           connection.get_path()]);
-        }
+        this.item.menu.addSettingsAction(_("VPN Settings"), 'gnome-network-panel.desktop');
     },
 
     _getDescription: function() {
@@ -1564,7 +1549,74 @@ const NMVPNSection = new Lang.Class({
 });
 Signals.addSignalMethods(NMVPNSection.prototype);
 
-const NMApplet = new Lang.Class({
+var DeviceCategory = new Lang.Class({
+    Name: 'DeviceCategory',
+    Extends: PopupMenu.PopupMenuSection,
+
+    _init: function(category) {
+        this.parent();
+
+        this._category = category;
+
+        this.devices = [];
+
+        this.section = new PopupMenu.PopupMenuSection();
+        this.section.box.connect('actor-added', Lang.bind(this, this._sync));
+        this.section.box.connect('actor-removed', Lang.bind(this, this._sync));
+        this.addMenuItem(this.section);
+
+        this._summaryItem = new PopupMenu.PopupSubMenuMenuItem('', true);
+        this._summaryItem.icon.icon_name = this._getSummaryIcon();
+        this.addMenuItem(this._summaryItem);
+
+        this._summaryItem.menu.addSettingsAction(_('Network Settings'),
+                                                 'gnome-network-panel.desktop');
+        this._summaryItem.actor.hide();
+
+    },
+
+    _sync: function() {
+        let nDevices = this.section.box.get_children().reduce(
+            function(prev, child) {
+                return prev + (child.visible ? 1 : 0);
+            }, 0);
+        this._summaryItem.label.text = this._getSummaryLabel(nDevices);
+        let shouldSummarize = nDevices > MAX_DEVICE_ITEMS;
+        this._summaryItem.actor.visible = shouldSummarize;
+        this.section.actor.visible = !shouldSummarize;
+    },
+
+    _getSummaryIcon: function() {
+        switch(this._category) {
+            case NMConnectionCategory.WIRED:
+                return 'network-wired-symbolic';
+            case NMConnectionCategory.WIRELESS:
+            case NMConnectionCategory.WWAN:
+                return 'network-wireless-symbolic';
+        }
+        return '';
+    },
+
+    _getSummaryLabel: function(nDevices) {
+        switch(this._category) {
+            case NMConnectionCategory.WIRED:
+                return ngettext("%s Wired Connection",
+                                "%s Wired Connections",
+                                nDevices).format(nDevices);
+            case NMConnectionCategory.WIRELESS:
+                return ngettext("%s Wi-Fi Connection",
+                                "%s Wi-Fi Connections",
+                                nDevices).format(nDevices);
+            case NMConnectionCategory.WWAN:
+                return ngettext("%s Modem Connection",
+                                "%s Modem Connections",
+                                nDevices).format(nDevices);
+        }
+        return '';
+    }
+});
+
+var NMApplet = new Lang.Class({
     Name: 'NMApplet',
     Extends: PanelMenu.SystemIndicator,
 
@@ -1607,15 +1659,6 @@ const NMApplet = new Lang.Class({
         this._tryLateInit();
     },
 
-    _createDeviceCategory: function() {
-        let category = {
-            section: new PopupMenu.PopupMenuSection(),
-            devices: [ ],
-        };
-        this.menu.addMenuItem(category.section);
-        return category;
-    },
-
     _tryLateInit: function() {
         if (!this._client || !this._settings)
             return;
@@ -1626,15 +1669,20 @@ const NMApplet = new Lang.Class({
 
         this._mainConnection = null;
         this._mainConnectionIconChangedId = 0;
+        this._mainConnectionStateChangedId = 0;
 
         this._notification = null;
 
         this._nmDevices = [];
         this._devices = { };
 
-        this._devices.wired = this._createDeviceCategory();
-        this._devices.wireless = this._createDeviceCategory();
-        this._devices.wwan = this._createDeviceCategory();
+        let categories = [NMConnectionCategory.WIRED,
+                          NMConnectionCategory.WIRELESS,
+                          NMConnectionCategory.WWAN];
+        for (let category of categories) {
+            this._devices[category] = new DeviceCategory(category);
+            this.menu.addMenuItem(this._devices[category]);
+        }
 
         this._vpnSection = new NMVPNSection(this._client);
         this._vpnSection.connect('activation-failed', Lang.bind(this, this._onActivationFailed));
@@ -1991,7 +2039,7 @@ const NMApplet = new Lang.Class({
         // (but in general we should only prompt a portal if we know there is a portal)
         if (GLib.getenv('GNOME_SHELL_CONNECTIVITY_TEST') != null)
             isPortal = isPortal || this._client.connectivity < NetworkManager.ConnectivityState.FULL;
-        if (!isPortal)
+        if (!isPortal || Main.sessionMode.isGreeter)
             return;
 
         let path = this._mainConnection.get_path();

@@ -1,6 +1,8 @@
 // -*- mode: js; js-indent-level: 4; indent-tabs-mode: nil -*-
 
-imports.gi.versions.Clutter = '1.0';
+const Config = imports.misc.config;
+
+imports.gi.versions.Clutter = Config.LIBMUTTER_API_VERSION;
 imports.gi.versions.Gio = '2.0';
 imports.gi.versions.Gdk = '3.0';
 imports.gi.versions.GdkPixbuf = '2.0';
@@ -8,7 +10,7 @@ imports.gi.versions.Gtk = '3.0';
 imports.gi.versions.TelepathyGLib = '0.12';
 imports.gi.versions.TelepathyLogger = '0.2';
 
-const Clutter = imports.gi.Clutter;;
+const Clutter = imports.gi.Clutter;
 const Gettext = imports.gettext;
 const GLib = imports.gi.GLib;
 const Gtk = imports.gi.Gtk;
@@ -61,10 +63,19 @@ function _patchLayoutClass(layoutClass, styleProps) {
     };
 }
 
-function _makeLoggingFunc(func) {
-    return function() {
-        return func([].join.call(arguments, ', '));
-    };
+function _loggingFunc() {
+    let fields = {'MESSAGE': [].join.call(arguments, ', ')};
+    let domain = "GNOME Shell";
+
+    // If the caller is an extension, add it as metadata
+    let extension = imports.misc.extensionUtils.getCurrentExtension();
+    if (extension != null) {
+        domain = extension.metadata.name;
+        fields['GNOME_SHELL_EXTENSION_UUID'] = extension.uuid;
+        fields['GNOME_SHELL_EXTENSION_NAME'] = extension.metadata.name;
+    }
+
+    GLib.log_structured(domain, GLib.LogLevelFlags.LEVEL_MESSAGE, fields);
 }
 
 function init() {
@@ -72,7 +83,7 @@ function init() {
     // browser convention of having that namespace be called 'window'.)
     window.global = Shell.Global.get();
 
-    window.log = _makeLoggingFunc(window.log);
+    window.log = _loggingFunc;
 
     window._ = Gettext.gettext;
     window.C_ = Gettext.pgettext;

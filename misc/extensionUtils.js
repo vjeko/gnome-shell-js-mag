@@ -6,29 +6,38 @@
 const Lang = imports.lang;
 const Signals = imports.signals;
 
-const GLib = imports.gi.GLib;
 const Gio = imports.gi.Gio;
-const ShellJS = imports.gi.ShellJS;
 
 const Config = imports.misc.config;
 const FileUtils = imports.misc.fileUtils;
 
-const ExtensionType = {
+var ExtensionType = {
     SYSTEM: 1,
     PER_USER: 2
 };
 
 // Maps uuid -> metadata object
-const extensions = {};
+var extensions = {};
 
+/**
+ * getCurrentExtension:
+ *
+ * Returns the current extension, or null if not called from an extension.
+ */
 function getCurrentExtension() {
-    let stack = (new Error()).stack;
+    let stack = (new Error()).stack.split('\n');
+    let extensionStackLine;
 
-    // Assuming we're importing this directly from an extension (and we shouldn't
-    // ever not be), its UUID should be directly in the path here.
-    let extensionStackLine = stack.split('\n')[1];
+    // Search for an occurrence of an extension stack frame
+    // Start at 1 because 0 is the stack frame of this function
+    for (let i = 1; i < stack.length; i++) {
+        if (stack[i].indexOf('/gnome-shell/extensions/') > -1) {
+            extensionStackLine = stack[i];
+            break;
+        }
+    }
     if (!extensionStackLine)
-        throw new Error('Could not find current extension');
+        return null;
 
     // The stack line is like:
     //   init([object Object])@/home/user/data/gnome-shell/extensions/u@u.id/prefs.js:8
@@ -38,7 +47,7 @@ function getCurrentExtension() {
     //   @/home/user/data/gnome-shell/extensions/u@u.id/prefs.js:8
     let match = new RegExp('@(.+):\\d+').exec(extensionStackLine);
     if (!match)
-        throw new Error('Could not find current extension');
+        return null;
 
     let path = match[1];
     let file = Gio.File.new_for_path(path);
@@ -52,7 +61,7 @@ function getCurrentExtension() {
         file = file.get_parent();
     }
 
-    throw new Error('Could not find current extension');
+    return null;
 }
 
 /**
@@ -140,15 +149,16 @@ function createExtensionObject(uuid, dir, type) {
     return extension;
 }
 
-var _extension = null;
-
 function installImporter(extension) {
-    _extension = extension;
-    ShellJS.add_extension_importer('imports.misc.extensionUtils._extension', 'imports', extension.path);
-    _extension = null;
+    let oldSearchPath = imports.searchPath.slice();  // make a copy
+    imports.searchPath = [extension.dir.get_parent().get_path()];
+    // importing a "subdir" creates a new importer object that doesn't affect
+    // the global one
+    extension.imports = imports[extension.uuid];
+    imports.searchPath = oldSearchPath;
 }
 
-const ExtensionFinder = new Lang.Class({
+var ExtensionFinder = new Lang.Class({
     Name: 'ExtensionFinder',
 
     _loadExtension: function(extensionDir, info, perUserDir) {

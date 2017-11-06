@@ -7,9 +7,9 @@ const Meta = imports.gi.Meta;
 
 const Main = imports.ui.main;
 
-const DEFAULT_LOCALE = 'en_US';
-const DEFAULT_LAYOUT = 'us';
-const DEFAULT_VARIANT = '';
+var DEFAULT_LOCALE = 'en_US';
+var DEFAULT_LAYOUT = 'us';
+var DEFAULT_VARIANT = '';
 
 let _xkbInfo = null;
 
@@ -38,7 +38,7 @@ function holdKeyboard() {
     global.display.freeze_keyboard(global.get_current_time());
 }
 
-const KeyboardManager = new Lang.Class({
+var KeyboardManager = new Lang.Class({
     Name: 'KeyboardManager',
 
     // The XKB protocol doesn't allow for more that 4 layouts in a
@@ -128,7 +128,8 @@ const KeyboardManager = new Lang.Class({
         if (!found)
             [, , id] = GnomeDesktop.get_input_source_from_locale(DEFAULT_LOCALE);
 
-        let [found, , , _layout, _variant] = this._xkbInfo.get_layout_info(id);
+        let _layout, _variant;
+        [found, , , _layout, _variant] = this._xkbInfo.get_layout_info(id);
         if (found)
             return { layout: _layout, variant: _variant };
         else

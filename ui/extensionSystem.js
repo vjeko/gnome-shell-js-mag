@@ -10,7 +10,7 @@ const St = imports.gi.St;
 const ExtensionUtils = imports.misc.extensionUtils;
 const Main = imports.ui.main;
 
-const ExtensionState = {
+var ExtensionState = {
     ENABLED: 1,
     DISABLED: 2,
     ERROR: 3,
@@ -26,7 +26,7 @@ const ExtensionState = {
 // Arrays of uuids
 var enabledExtensions;
 // Contains the order that extensions were enabled in.
-const extensionOrder = [];
+var extensionOrder = [];
 
 // We don't really have a class to add signals on. So, create
 // a simple dummy object, add the signal methods, and export those
@@ -34,10 +34,11 @@ const extensionOrder = [];
 var _signals = {};
 Signals.addSignalMethods(_signals);
 
-const connect = Lang.bind(_signals, _signals.connect);
-const disconnect = Lang.bind(_signals, _signals.disconnect);
+var connect = Lang.bind(_signals, _signals.connect);
+var disconnect = Lang.bind(_signals, _signals.disconnect);
 
 const ENABLED_EXTENSIONS_KEY = 'enabled-extensions';
+const DISABLE_USER_EXTENSIONS_KEY = 'disable-user-extensions';
 const EXTENSION_DISABLE_VERSION_CHECK_KEY = 'disable-extension-version-validation';
 
 var initted = false;
@@ -198,7 +199,14 @@ function reloadExtension(oldExtension) {
     unloadExtension(oldExtension);
 
     // Now, recreate the extension and load it.
-    let newExtension = ExtensionUtils.createExtensionObject(uuid, dir, type);
+    let newExtension;
+    try {
+        newExtension = ExtensionUtils.createExtensionObject(uuid, dir, type);
+    } catch(e) {
+        logExtensionError(uuid, e);
+        return;
+    }
+
     loadExtension(newExtension);
 }
 
@@ -210,14 +218,21 @@ function initExtension(uuid) {
         throw new Error("Extension was not properly created. Call loadExtension first");
 
     let extensionJs = dir.get_child('extension.js');
-    if (!extensionJs.query_exists(null))
-        throw new Error('Missing extension.js');
+    if (!extensionJs.query_exists(null)) {
+        logExtensionError(uuid, new Error('Missing extension.js'));
+        return false;
+    }
 
     let extensionModule;
     let extensionState = null;
 
     ExtensionUtils.installImporter(extension);
-    extensionModule = extension.imports.extension;
+    try {
+        extensionModule = extension.imports.extension;
+    } catch(e) {
+        logExtensionError(uuid, e);
+        return false;
+    }
 
     if (extensionModule.init) {
         try {
@@ -238,11 +253,16 @@ function initExtension(uuid) {
 }
 
 function getEnabledExtensions() {
-    let extensions = global.settings.get_strv(ENABLED_EXTENSIONS_KEY);
-    if (!Array.isArray(Main.sessionMode.enabledExtensions))
+    let extensions;
+    if (Array.isArray(Main.sessionMode.enabledExtensions))
+        extensions = Main.sessionMode.enabledExtensions;
+    else
+        extensions = [];
+
+    if (global.settings.get_boolean(DISABLE_USER_EXTENSIONS_KEY))
         return extensions;
 
-    return Main.sessionMode.enabledExtensions.concat(extensions);
+    return extensions.concat(global.settings.get_strv(ENABLED_EXTENSIONS_KEY));
 }
 
 function onEnabledExtensionsChanged() {
@@ -276,26 +296,19 @@ function _onVersionValidationChanged() {
     // temporarily disable them all
     enabledExtensions = [];
     for (let uuid in ExtensionUtils.extensions)
-        try {
-            reloadExtension(ExtensionUtils.extensions[uuid]);
-        } catch(e) {
-            logExtensionError(uuid, e);
-        }
+        reloadExtension(ExtensionUtils.extensions[uuid]);
     enabledExtensions = getEnabledExtensions();
 
     if (Main.sessionMode.allowExtensions) {
         enabledExtensions.forEach(function(uuid) {
-            try {
-                enableExtension(uuid);
-            } catch(e) {
-                logExtensionError(uuid, e);
-            }
+            enableExtension(uuid);
         });
     }
 }
 
 function _loadExtensions() {
     global.settings.connect('changed::' + ENABLED_EXTENSIONS_KEY, onEnabledExtensionsChanged);
+    global.settings.connect('changed::' + DISABLE_USER_EXTENSIONS_KEY, onEnabledExtensionsChanged);
     global.settings.connect('changed::' + EXTENSION_DISABLE_VERSION_CHECK_KEY, _onVersionValidationChanged);
 
     enabledExtensions = getEnabledExtensions();

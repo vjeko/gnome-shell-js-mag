@@ -12,29 +12,29 @@ const Params = imports.misc.params;
 const Tweener = imports.ui.tweener;
 const Main = imports.ui.main;
 
-const ICON_SIZE = 96;
-const MIN_ICON_SIZE = 16;
+var ICON_SIZE = 96;
+var MIN_ICON_SIZE = 16;
 
-const EXTRA_SPACE_ANIMATION_TIME = 0.25;
+var EXTRA_SPACE_ANIMATION_TIME = 0.25;
 
-const ANIMATION_TIME_IN = 0.350;
-const ANIMATION_TIME_OUT = 1/2 * ANIMATION_TIME_IN;
-const ANIMATION_MAX_DELAY_FOR_ITEM = 2/3 * ANIMATION_TIME_IN;
-const ANIMATION_BASE_DELAY_FOR_ITEM = 1/4 * ANIMATION_MAX_DELAY_FOR_ITEM;
-const ANIMATION_MAX_DELAY_OUT_FOR_ITEM = 2/3 * ANIMATION_TIME_OUT;
-const ANIMATION_FADE_IN_TIME_FOR_ITEM = 1/4 * ANIMATION_TIME_IN;
+var ANIMATION_TIME_IN = 0.350;
+var ANIMATION_TIME_OUT = 1/2 * ANIMATION_TIME_IN;
+var ANIMATION_MAX_DELAY_FOR_ITEM = 2/3 * ANIMATION_TIME_IN;
+var ANIMATION_BASE_DELAY_FOR_ITEM = 1/4 * ANIMATION_MAX_DELAY_FOR_ITEM;
+var ANIMATION_MAX_DELAY_OUT_FOR_ITEM = 2/3 * ANIMATION_TIME_OUT;
+var ANIMATION_FADE_IN_TIME_FOR_ITEM = 1/4 * ANIMATION_TIME_IN;
 
-const ANIMATION_BOUNCE_ICON_SCALE = 1.1;
+var ANIMATION_BOUNCE_ICON_SCALE = 1.1;
 
-const AnimationDirection = {
+var AnimationDirection = {
     IN: 0,
     OUT: 1
 };
 
-const APPICON_ANIMATION_OUT_SCALE = 3;
-const APPICON_ANIMATION_OUT_TIME = 0.25;
+var APPICON_ANIMATION_OUT_SCALE = 3;
+var APPICON_ANIMATION_OUT_TIME = 0.25;
 
-const BaseIcon = new Lang.Class({
+var BaseIcon = new Lang.Class({
     Name: 'BaseIcon',
 
     _init : function(label, params) {
@@ -240,7 +240,7 @@ function zoomOutActor(actor) {
                     });
 }
 
-const IconGrid = new Lang.Class({
+var IconGrid = new Lang.Class({
     Name: 'IconGrid',
 
     _init: function(params) {
@@ -267,6 +267,7 @@ const IconGrid = new Lang.Class({
         this.actor = new St.BoxLayout({ style_class: 'icon-grid',
                                         vertical: true });
         this._items = [];
+        this._clonesAnimating = [];
         // Pulled from CSS, but hardcode some defaults here
         this._spacing = 0;
         this._hItemSize = this._vItemSize = ICON_SIZE;
@@ -274,6 +275,13 @@ const IconGrid = new Lang.Class({
         this._grid = new Shell.GenericContainer();
         this.actor.add(this._grid, { expand: true, y_align: St.Align.START });
         this.actor.connect('style-changed', Lang.bind(this, this._onStyleChanged));
+
+        // Cancel animations when hiding the overview, to avoid icons
+        // swarming into the void ...
+        this.actor.connect('notify::mapped', () => {
+            if (!this.actor.mapped)
+                this._cancelAnimation();
+        });
 
         this._grid.connect('get-preferred-width', Lang.bind(this, this._getPreferredWidth));
         this._grid.connect('get-preferred-height', Lang.bind(this, this._getPreferredHeight));
@@ -410,8 +418,13 @@ const IconGrid = new Lang.Class({
         return this._getVisibleChildren();
     },
 
+    _cancelAnimation: function() {
+        this._clonesAnimating.forEach(clone => { clone.destroy(); });
+        this._clonesAnimating = [];
+    },
+
     _animationDone: function() {
-        this._animating = false;
+        this._clonesAnimating = [];
         this.emit('animation-done');
     },
 
@@ -419,10 +432,7 @@ const IconGrid = new Lang.Class({
         if (animationDirection != AnimationDirection.IN)
             throw new Error("Pulse animation only implements 'in' animation direction");
 
-        if (this._animating)
-            return;
-
-        this._animating = true;
+        this._cancelAnimation();
 
         let actors = this._getChildrenToAnimate();
         if (actors.length == 0) {
@@ -470,10 +480,7 @@ const IconGrid = new Lang.Class({
     },
 
     animateSpring: function(animationDirection, sourceActor) {
-        if (this._animating)
-            return;
-
-        this._animating = true;
+        this._cancelAnimation();
 
         let actors = this._getChildrenToAnimate();
         if (actors.length == 0) {
@@ -507,6 +514,7 @@ const IconGrid = new Lang.Class({
             actor.reactive = false;
 
             let actorClone = new Clutter.Clone({ source: actor });
+            this._clonesAnimating.push(actorClone);
             Main.uiGroup.add_actor(actorClone);
 
             let [width, height,,] = this._getAllocatedChildSizeAndSpacing(actor);
@@ -790,7 +798,7 @@ const IconGrid = new Lang.Class({
 });
 Signals.addSignalMethods(IconGrid.prototype);
 
-const PaginatedIconGrid = new Lang.Class({
+var PaginatedIconGrid = new Lang.Class({
     Name: 'PaginatedIconGrid',
     Extends: IconGrid,
 

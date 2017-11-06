@@ -17,28 +17,28 @@ const ShellEntry = imports.ui.shellEntry;
 const SmartcardManager = imports.misc.smartcardManager;
 const Tweener = imports.ui.tweener;
 
-const PASSWORD_SERVICE_NAME = 'gdm-password';
-const FINGERPRINT_SERVICE_NAME = 'gdm-fingerprint';
-const SMARTCARD_SERVICE_NAME = 'gdm-smartcard';
-const OVIRT_SERVICE_NAME = 'gdm-ovirtcred';
-const FADE_ANIMATION_TIME = 0.16;
-const CLONE_FADE_ANIMATION_TIME = 0.25;
+var PASSWORD_SERVICE_NAME = 'gdm-password';
+var FINGERPRINT_SERVICE_NAME = 'gdm-fingerprint';
+var SMARTCARD_SERVICE_NAME = 'gdm-smartcard';
+var OVIRT_SERVICE_NAME = 'gdm-ovirtcred';
+var FADE_ANIMATION_TIME = 0.16;
+var CLONE_FADE_ANIMATION_TIME = 0.25;
 
-const LOGIN_SCREEN_SCHEMA = 'org.gnome.login-screen';
-const PASSWORD_AUTHENTICATION_KEY = 'enable-password-authentication';
-const FINGERPRINT_AUTHENTICATION_KEY = 'enable-fingerprint-authentication';
-const SMARTCARD_AUTHENTICATION_KEY = 'enable-smartcard-authentication';
-const BANNER_MESSAGE_KEY = 'banner-message-enable';
-const BANNER_MESSAGE_TEXT_KEY = 'banner-message-text';
-const ALLOWED_FAILURES_KEY = 'allowed-failures';
+var LOGIN_SCREEN_SCHEMA = 'org.gnome.login-screen';
+var PASSWORD_AUTHENTICATION_KEY = 'enable-password-authentication';
+var FINGERPRINT_AUTHENTICATION_KEY = 'enable-fingerprint-authentication';
+var SMARTCARD_AUTHENTICATION_KEY = 'enable-smartcard-authentication';
+var BANNER_MESSAGE_KEY = 'banner-message-enable';
+var BANNER_MESSAGE_TEXT_KEY = 'banner-message-text';
+var ALLOWED_FAILURES_KEY = 'allowed-failures';
 
-const LOGO_KEY = 'logo';
-const DISABLE_USER_LIST_KEY = 'disable-user-list';
+var LOGO_KEY = 'logo';
+var DISABLE_USER_LIST_KEY = 'disable-user-list';
 
 // Give user 48ms to read each character of a PAM message
-const USER_READ_TIME = 48
+var USER_READ_TIME = 48
 
-const MessageType = {
+var MessageType = {
     NONE: 0,
     ERROR: 1,
     INFO: 2,
@@ -119,7 +119,7 @@ function cloneAndFadeOutActor(actor) {
     return hold;
 }
 
-const ShellUserVerifier = new Lang.Class({
+var ShellUserVerifier = new Lang.Class({
     Name: 'ShellUserVerifier',
 
     _init: function(client, params) {
@@ -128,18 +128,22 @@ const ShellUserVerifier = new Lang.Class({
 
         this._client = client;
 
+        this._defaultService = null;
+        this._preemptingService = null;
+
         this._settings = new Gio.Settings({ schema_id: LOGIN_SCREEN_SCHEMA });
         this._settings.connect('changed',
                                Lang.bind(this, this._updateDefaultService));
         this._updateDefaultService();
 
-        this._fprintManager = new Fprint.FprintManager();
+        this._fprintManager = Fprint.FprintManager();
         this._smartcardManager = SmartcardManager.getSmartcardManager();
 
         // We check for smartcards right away, since an inserted smartcard
         // at startup should result in immediately initiating authentication.
-        // This is different than fingeprint readers, where we only check them
+        // This is different than fingerprint readers, where we only check them
         // after a user has been picked.
+        this.smartcardDetected = false;
         this._checkForSmartcard();
 
         this._smartcardInsertedId = this._smartcardManager.connect('smartcard-inserted',
@@ -293,7 +297,8 @@ const ShellUserVerifier = new Lang.Class({
     _checkForFingerprintReader: function() {
         this._haveFingerprintReader = false;
 
-        if (!this._settings.get_boolean(FINGERPRINT_AUTHENTICATION_KEY)) {
+        if (!this._settings.get_boolean(FINGERPRINT_AUTHENTICATION_KEY) ||
+            this._fprintManager == null) {
             this._updateDefaultService();
             return;
         }
@@ -539,7 +544,8 @@ const ShellUserVerifier = new Lang.Class({
                 let signalId = this.connect('no-more-messages',
                                             Lang.bind(this, function() {
                                                 this.disconnect(signalId);
-                                                this._retry();
+                                                if (this._cancellable && !this._cancellable.is_cancelled())
+                                                    this._retry();
                                             }));
             }
         } else {

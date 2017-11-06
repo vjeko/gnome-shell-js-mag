@@ -25,12 +25,12 @@ const RemoteMenu = imports.ui.remoteMenu;
 const Main = imports.ui.main;
 const Tweener = imports.ui.tweener;
 
-const PANEL_ICON_SIZE = 16;
-const APP_MENU_ICON_MARGIN = 0;
+var PANEL_ICON_SIZE = 16;
+var APP_MENU_ICON_MARGIN = 0;
 
-const BUTTON_DND_ACTIVATION_TIMEOUT = 250;
+var BUTTON_DND_ACTIVATION_TIMEOUT = 250;
 
-const SPINNER_ANIMATION_TIME = 1.0;
+var SPINNER_ANIMATION_TIME = 1.0;
 
 // To make sure the panel corners blend nicely with the panel,
 // we draw background and borders the same way, e.g. drawing
@@ -83,7 +83,7 @@ function _unpremultiply(color) {
  * this menu also handles startup notification for it.  So when we
  * have an active startup notification, we switch modes to display that.
  */
-const AppMenuButton = new Lang.Class({
+var AppMenuButton = new Lang.Class({
     Name: 'AppMenuButton',
     Extends: PanelMenu.Button,
 
@@ -399,7 +399,7 @@ const AppMenuButton = new Lang.Class({
 
 Signals.addSignalMethods(AppMenuButton.prototype);
 
-const ActivitiesButton = new Lang.Class({
+var ActivitiesButton = new Lang.Class({
     Name: 'ActivitiesButton',
     Extends: PanelMenu.Button,
 
@@ -487,7 +487,7 @@ const ActivitiesButton = new Lang.Class({
     }
 });
 
-const PanelCorner = new Lang.Class({
+var PanelCorner = new Lang.Class({
     Name: 'PanelCorner',
 
     _init: function(side) {
@@ -654,7 +654,7 @@ const PanelCorner = new Lang.Class({
     }
 });
 
-const AggregateLayout = new Lang.Class({
+var AggregateLayout = new Lang.Class({
     Name: 'AggregateLayout',
     Extends: Clutter.BoxLayout,
 
@@ -687,7 +687,7 @@ const AggregateLayout = new Lang.Class({
     }
 });
 
-const AggregateMenu = new Lang.Class({
+var AggregateMenu = new Lang.Class({
     Name: 'AggregateMenu',
     Extends: PanelMenu.Button,
 
@@ -719,9 +719,11 @@ const AggregateMenu = new Lang.Class({
         this._system = new imports.ui.status.system.Indicator();
         this._screencast = new imports.ui.status.screencast.Indicator();
         this._location = new imports.ui.status.location.Indicator();
+        this._nightLight = new imports.ui.status.nightLight.Indicator();
 
         this._indicators.add_child(this._screencast.indicators);
         this._indicators.add_child(this._location.indicators);
+        this._indicators.add_child(this._nightLight.indicators);
         if (this._network) {
             this._indicators.add_child(this._network.indicators);
         }
@@ -745,6 +747,7 @@ const AggregateMenu = new Lang.Class({
         this.menu.addMenuItem(this._location.menu);
         this.menu.addMenuItem(this._rfkill.menu);
         this.menu.addMenuItem(this._power.menu);
+        this.menu.addMenuItem(this._nightLight.menu);
         this.menu.addMenuItem(this._system.menu);
 
         menuLayout.addSizeChild(this._location.menu.actor);
@@ -764,7 +767,7 @@ const PANEL_ITEM_IMPLEMENTATIONS = {
     'keyboard': imports.ui.status.keyboard.InputSourceIndicator,
 };
 
-const Panel = new Lang.Class({
+var Panel = new Lang.Class({
     Name: 'Panel',
 
     _init : function() {
@@ -798,9 +801,11 @@ const Panel = new Lang.Class({
 
         Main.overview.connect('showing', Lang.bind(this, function () {
             this.actor.add_style_pseudo_class('overview');
+            this._updateSolidStyle();
         }));
         Main.overview.connect('hiding', Lang.bind(this, function () {
             this.actor.remove_style_pseudo_class('overview');
+            this._updateSolidStyle();
         }));
 
         Main.layoutManager.panelBox.add(this.actor);
@@ -808,12 +813,40 @@ const Panel = new Lang.Class({
                                         { sortGroup: CtrlAltTab.SortGroup.TOP });
 
         Main.sessionMode.connect('updated', Lang.bind(this, this._updatePanel));
+
+        this._trackedWindows = new Map();
+        global.window_group.connect('actor-added', Lang.bind(this, this._onWindowActorAdded));
+        global.window_group.connect('actor-removed', Lang.bind(this, this._onWindowActorRemoved));
+        global.window_manager.connect('switch-workspace', Lang.bind(this, this._updateSolidStyle));
+
         this._updatePanel();
     },
 
+    _onWindowActorAdded: function(container, metaWindowActor) {
+        let signalIds = [];
+        ['allocation-changed', 'notify::visible'].forEach(s => {
+            signalIds.push(metaWindowActor.connect(s, Lang.bind(this, this._updateSolidStyle)));
+        });
+        this._trackedWindows.set(metaWindowActor, signalIds);
+    },
+
+    _onWindowActorRemoved: function(container, metaWindowActor) {
+        this._trackedWindows.get(metaWindowActor).forEach(id => {
+            metaWindowActor.disconnect(id);
+        });
+        this._trackedWindows.delete(metaWindowActor);
+        this._updateSolidStyle();
+    },
+
     _getPreferredWidth: function(actor, forHeight, alloc) {
+        let primaryMonitor = Main.layoutManager.primaryMonitor;
+
         alloc.min_size = -1;
-        alloc.natural_size = Main.layoutManager.primaryMonitor.width;
+
+        if (primaryMonitor)
+            alloc.natural_size = primaryMonitor.width;
+        else
+            alloc.natural_size = -1;
     },
 
     _getPreferredHeight: function(actor, forWidth, alloc) {
@@ -832,15 +865,16 @@ const Panel = new Lang.Class({
 
         let sideWidth, centerWidth;
         centerWidth = centerNaturalWidth;
-        sideWidth = (allocWidth - centerWidth) / 2;
+        sideWidth = Math.max(0, (allocWidth - centerWidth) / 2);
 
         let childBox = new Clutter.ActorBox();
 
         childBox.y1 = 0;
         childBox.y2 = allocHeight;
         if (this.actor.get_text_direction() == Clutter.TextDirection.RTL) {
-            childBox.x1 = allocWidth - Math.min(Math.floor(sideWidth),
-                                                leftNaturalWidth);
+            childBox.x1 = Math.max(allocWidth - Math.min(Math.floor(sideWidth),
+                                                         leftNaturalWidth),
+                                   0);
             childBox.x2 = allocWidth;
         } else {
             childBox.x1 = 0;
@@ -862,8 +896,9 @@ const Panel = new Lang.Class({
             childBox.x2 = Math.min(Math.floor(sideWidth),
                                    rightNaturalWidth);
         } else {
-            childBox.x1 = allocWidth - Math.min(Math.floor(sideWidth),
-                                                rightNaturalWidth);
+            childBox.x1 = Math.max(allocWidth - Math.min(Math.floor(sideWidth),
+                                                         rightNaturalWidth),
+                                   0);
             childBox.x2 = allocWidth;
         }
         this._rightBox.allocate(childBox, flags);
@@ -993,6 +1028,8 @@ const Panel = new Lang.Class({
         else
             Main.messageTray.bannerAlignment = Clutter.ActorAlign.CENTER;
 
+        this._updateSolidStyle();
+
         if (this._sessionStyle)
             this._removeStyleClassName(this._sessionStyle);
 
@@ -1009,13 +1046,44 @@ const Panel = new Lang.Class({
         }
     },
 
+    _updateSolidStyle: function() {
+        if (this.actor.has_style_pseudo_class('overview') || !Main.sessionMode.hasWindows) {
+            this._removeStyleClassName('solid');
+            return;
+        }
+
+        if (!Main.layoutManager.primaryMonitor)
+            return;
+
+        /* Get all the windows in the active workspace that are in the primary monitor and visible */
+        let activeWorkspace = global.screen.get_active_workspace();
+        let windows = activeWorkspace.list_windows().filter(function(metaWindow) {
+            return metaWindow.is_on_primary_monitor() &&
+                   metaWindow.showing_on_its_workspace() &&
+                   metaWindow.get_window_type() != Meta.WindowType.DESKTOP;
+        });
+
+        /* Check if at least one window is near enough to the panel */
+        let [, panelTop] = this.actor.get_transformed_position();
+        let panelBottom = panelTop + this.actor.get_height();
+        let scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        let isNearEnough = windows.some(Lang.bind(this, function(metaWindow) {
+            let verticalPosition = metaWindow.get_frame_rect().y;
+            return verticalPosition < panelBottom + 5 * scale;
+        }));
+
+        if (isNearEnough)
+            this._addStyleClassName('solid');
+        else
+            this._removeStyleClassName('solid');
+
+    },
+
     _hideIndicators: function() {
         for (let role in PANEL_ITEM_IMPLEMENTATIONS) {
             let indicator = this.statusArea[role];
             if (!indicator)
                 continue;
-            if (indicator.menu)
-                indicator.menu.close();
             indicator.container.hide();
         }
     },
@@ -1101,7 +1169,7 @@ const Panel = new Lang.Class({
     },
 
     _onMenuSet: function(indicator) {
-        if (!indicator.menu || indicator.menu._openChangedId > 0)
+        if (!indicator.menu || indicator.menu.hasOwnProperty('_openChangedId'))
             return;
 
         indicator.menu._openChangedId = indicator.menu.connect('open-state-changed',

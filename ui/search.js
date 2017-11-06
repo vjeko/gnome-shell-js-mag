@@ -17,15 +17,14 @@ const IconGrid = imports.ui.iconGrid;
 const Main = imports.ui.main;
 const Overview = imports.ui.overview;
 const RemoteSearch = imports.ui.remoteSearch;
-const Separator = imports.ui.separator;
 const Util = imports.misc.util;
 
 const SEARCH_PROVIDERS_SCHEMA = 'org.gnome.desktop.search-providers';
 
-const MAX_LIST_SEARCH_RESULTS_ROWS = 3;
-const MAX_GRID_SEARCH_RESULTS_ROWS = 1;
+var MAX_LIST_SEARCH_RESULTS_ROWS = 5;
+var MAX_GRID_SEARCH_RESULTS_ROWS = 1;
 
-const MaxWidthBin = new Lang.Class({
+var MaxWidthBin = new Lang.Class({
     Name: 'MaxWidthBin',
     Extends: St.Bin,
 
@@ -45,12 +44,13 @@ const MaxWidthBin = new Lang.Class({
     }
 });
 
-const SearchResult = new Lang.Class({
+var SearchResult = new Lang.Class({
     Name: 'SearchResult',
 
-    _init: function(provider, metaInfo) {
+    _init: function(provider, metaInfo, resultsView) {
         this.provider = provider;
         this.metaInfo = metaInfo;
+        this._resultsView = resultsView;
 
         this.actor = new St.Button({ reactive: true,
                                      can_focus: true,
@@ -68,14 +68,14 @@ const SearchResult = new Lang.Class({
 });
 Signals.addSignalMethods(SearchResult.prototype);
 
-const ListSearchResult = new Lang.Class({
+var ListSearchResult = new Lang.Class({
     Name: 'ListSearchResult',
     Extends: SearchResult,
 
-    ICON_SIZE: 64,
+    ICON_SIZE: 24,
 
-    _init: function(provider, metaInfo) {
-        this.parent(provider, metaInfo);
+    _init: function(provider, metaInfo, resultsView) {
+        this.parent(provider, metaInfo, resultsView);
 
         this.actor.style_class = 'list-search-result';
         this.actor.x_fill = true;
@@ -84,43 +84,64 @@ const ListSearchResult = new Lang.Class({
                                          vertical: false });
         this.actor.set_child(content);
 
+        this._termsChangedId = 0;
+
+        let titleBox = new St.BoxLayout({ style_class: 'list-search-result-title' });
+
+        content.add(titleBox, { x_fill: true,
+                                y_fill: false,
+                                x_align: St.Align.START,
+                                y_align: St.Align.MIDDLE });
+
         // An icon for, or thumbnail of, content
         let icon = this.metaInfo['createIcon'](this.ICON_SIZE);
         if (icon) {
-            content.add(icon);
+            titleBox.add(icon);
         }
 
-        let details = new St.BoxLayout({ vertical: true });
-        content.add(details, { x_fill: true,
-                               y_fill: false,
-                               x_align: St.Align.START,
-                               y_align: St.Align.MIDDLE });
+        let title = new St.Label({ text: this.metaInfo['name'] });
+        titleBox.add(title, { x_fill: false,
+                              y_fill: false,
+                              x_align: St.Align.START,
+                              y_align: St.Align.MIDDLE });
 
-        let title = new St.Label({ style_class: 'list-search-result-title',
-                                   text: this.metaInfo['name'] })
-        details.add(title, { x_fill: false,
-                             y_fill: false,
-                             x_align: St.Align.START,
-                             y_align: St.Align.START });
         this.actor.label_actor = title;
 
         if (this.metaInfo['description']) {
-            let description = new St.Label({ style_class: 'list-search-result-description' });
-            description.clutter_text.set_markup(this.metaInfo['description']);
-            details.add(description, { x_fill: false,
-                                       y_fill: false,
-                                       x_align: St.Align.START,
-                                       y_align: St.Align.END });
+            this._descriptionLabel = new St.Label({ style_class: 'list-search-result-description' });
+            content.add(this._descriptionLabel, { x_fill: false,
+                                                  y_fill: false,
+                                                  x_align: St.Align.START,
+                                                  y_align: St.Align.MIDDLE });
+
+            this._termsChangedId =
+                this._resultsView.connect('terms-changed',
+                                          Lang.bind(this, this._highlightTerms));
+
+            this._highlightTerms();
         }
+
+        this.actor.connect('destroy', Lang.bind(this, this._onDestroy));
+    },
+
+    _highlightTerms: function() {
+        let markup = this._resultsView.highlightTerms(this.metaInfo['description'].split('\n')[0]);
+        this._descriptionLabel.clutter_text.set_markup(markup);
+    },
+
+    _onDestroy: function() {
+        if (this._termsChangedId)
+            this._resultsView.disconnect(this._termsChangedId);
+        this._termsChangedId = 0;
     }
 });
 
-const GridSearchResult = new Lang.Class({
+var GridSearchResult = new Lang.Class({
     Name: 'GridSearchResult',
     Extends: SearchResult,
 
-    _init: function(provider, metaInfo) {
-        this.parent(provider, metaInfo);
+    _init: function(provider, metaInfo, resultsView) {
+        this.parent(provider, metaInfo, resultsView);
 
         this.actor.style_class = 'grid-search-result';
 
@@ -132,11 +153,12 @@ const GridSearchResult = new Lang.Class({
     }
 });
 
-const SearchResultsBase = new Lang.Class({
+var SearchResultsBase = new Lang.Class({
     Name: 'SearchResultsBase',
 
-    _init: function(provider) {
+    _init: function(provider, resultsView) {
         this.provider = provider;
+        this._resultsView = resultsView;
 
         this._terms = [];
 
@@ -147,10 +169,12 @@ const SearchResultsBase = new Lang.Class({
                                               y_fill: true });
         this.actor.add(this._resultDisplayBin, { expand: true });
 
-        let separator = new Separator.HorizontalSeparator({ style_class: 'search-section-separator' });
-        this.actor.add(separator.actor);
+        let separator = new St.Widget({ style_class: 'search-section-separator' });
+        this.actor.add(separator);
 
         this._resultDisplays = {};
+
+        this._clipboard = St.Clipboard.get_default();
 
         this._cancellable = new Gio.Cancellable();
     },
@@ -162,7 +186,7 @@ const SearchResultsBase = new Lang.Class({
 
     _createResultDisplay: function(meta) {
         if (this.provider.createResultObject)
-            return this.provider.createResultObject(meta);
+            return this.provider.createResultObject(meta, this._resultsView);
 
         return null;
     },
@@ -181,10 +205,12 @@ const SearchResultsBase = new Lang.Class({
 
     _activateResult: function(result, id) {
         this.provider.activateResult(id, this._terms);
+        if (result.metaInfo.clipboardText)
+            this._clipboard.set_text(St.ClipboardType.CLIPBOARD, result.metaInfo.clipboardText);
         Main.overview.toggle();
     },
 
-    _setMoreIconVisible: function(visible) {
+    _setMoreCount: function(count) {
     },
 
     _ensureResultActors: function(results, callback) {
@@ -227,7 +253,6 @@ const SearchResultsBase = new Lang.Class({
 
     updateSearch: function(providerResults, terms, callback) {
         this._terms = terms;
-
         if (providerResults.length == 0) {
             this._clearResultDisplay();
             this.actor.hide();
@@ -235,7 +260,7 @@ const SearchResultsBase = new Lang.Class({
         } else {
             let maxResults = this._getMaxDisplayedResults();
             let results = this.provider.filterResults(providerResults, maxResults);
-            let hasMoreResults = results.length < providerResults.length;
+            let moreCount = Math.max(providerResults.length - results.length, 0);
 
             this._ensureResultActors(results, Lang.bind(this, function(successful) {
                 if (!successful) {
@@ -252,7 +277,7 @@ const SearchResultsBase = new Lang.Class({
                 results.forEach(Lang.bind(this, function(resultId) {
                     this._addItem(this._resultDisplays[resultId]);
                 }));
-                this._setMoreIconVisible(hasMoreResults && this.provider.canLaunchSearch);
+                this._setMoreCount(this.provider.canLaunchSearch ? moreCount : 0);
                 this.actor.show();
                 callback();
             }));
@@ -260,24 +285,24 @@ const SearchResultsBase = new Lang.Class({
     }
 });
 
-const ListSearchResults = new Lang.Class({
+var ListSearchResults = new Lang.Class({
     Name: 'ListSearchResults',
     Extends: SearchResultsBase,
 
-    _init: function(provider) {
-        this.parent(provider);
+    _init: function(provider, resultsView) {
+        this.parent(provider, resultsView);
 
         this._container = new St.BoxLayout({ style_class: 'search-section-content' });
-        this.providerIcon = new ProviderIcon(provider);
-        this.providerIcon.connect('key-focus-in', Lang.bind(this, this._keyFocusIn));
-        this.providerIcon.connect('clicked', Lang.bind(this,
+        this.providerInfo = new ProviderInfo(provider);
+        this.providerInfo.connect('key-focus-in', Lang.bind(this, this._keyFocusIn));
+        this.providerInfo.connect('clicked', Lang.bind(this,
             function() {
-                this.providerIcon.animateLaunch();
+                this.providerInfo.animateLaunch();
                 provider.launchSearch(this._terms);
                 Main.overview.toggle();
             }));
 
-        this._container.add(this.providerIcon, { x_fill: false,
+        this._container.add(this.providerInfo, { x_fill: false,
                                                  y_fill: false,
                                                  x_align: St.Align.START,
                                                  y_align: St.Align.START });
@@ -289,8 +314,8 @@ const ListSearchResults = new Lang.Class({
         this._resultDisplayBin.set_child(this._container);
     },
 
-    _setMoreIconVisible: function(visible) {
-        this.providerIcon.moreIcon.visible = visible;
+    _setMoreCount: function(count) {
+        this.providerInfo.setMoreCount(count);
     },
 
     _getMaxDisplayedResults: function() {
@@ -302,7 +327,8 @@ const ListSearchResults = new Lang.Class({
     },
 
     _createResultDisplay: function(meta) {
-        return this.parent(meta) || new ListSearchResult(this.provider, meta);
+        return this.parent(meta, this._resultsView) ||
+               new ListSearchResult(this.provider, meta, this._resultsView);
     },
 
     _addItem: function(display) {
@@ -318,18 +344,18 @@ const ListSearchResults = new Lang.Class({
 });
 Signals.addSignalMethods(ListSearchResults.prototype);
 
-const GridSearchResults = new Lang.Class({
+var GridSearchResults = new Lang.Class({
     Name: 'GridSearchResults',
     Extends: SearchResultsBase,
 
-    _init: function(provider, parentContainer) {
-        this.parent(provider);
+    _init: function(provider, resultsView) {
+        this.parent(provider, resultsView);
         // We need to use the parent container to know how much results we can show.
         // None of the actors in this class can be used for that, since the main actor
         // goes hidden when no results are displayed, and then it lost its allocation.
         // Then on the next use of _getMaxDisplayedResults allocation is 0, en therefore
         // it doesn't show any result although we have some.
-        this._parentContainer = parentContainer;
+        this._parentContainer = resultsView.actor;
 
         this._grid = new IconGrid.IconGrid({ rowLimit: MAX_GRID_SEARCH_RESULTS_ROWS,
                                              xAlign: St.Align.START });
@@ -350,7 +376,8 @@ const GridSearchResults = new Lang.Class({
     },
 
     _createResultDisplay: function(meta) {
-        return this.parent(meta) || new GridSearchResult(this.provider, meta);
+        return this.parent(meta, this._resultsView) ||
+               new GridSearchResult(this.provider, meta, this._resultsView);
     },
 
     _addItem: function(display) {
@@ -366,7 +393,7 @@ const GridSearchResults = new Lang.Class({
 });
 Signals.addSignalMethods(GridSearchResults.prototype);
 
-const SearchResults = new Lang.Class({
+var SearchResults = new Lang.Class({
     Name: 'SearchResults',
 
     _init: function() {
@@ -413,6 +440,8 @@ const SearchResults = new Lang.Class({
         this._results = {};
 
         this._providers = [];
+
+        this._highlightRegex = null;
 
         this._searchSettings = new Gio.Settings({ schema_id: SEARCH_PROVIDERS_SCHEMA });
         this._searchSettings.connect('changed::disabled', Lang.bind(this, this._reloadRemoteProviders));
@@ -533,6 +562,11 @@ const SearchResults = new Lang.Class({
 
         if (this._searchTimeoutId == 0)
             this._searchTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, Lang.bind(this, this._onSearchTimeout));
+
+        let escapedTerms = this._terms.map(term => Shell.util_regex_escape(term));
+        this._highlightRegex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
+
+        this.emit('terms-changed');
     },
 
     _onPan: function(action) {
@@ -552,9 +586,9 @@ const SearchResults = new Lang.Class({
 
         let providerDisplay;
         if (provider.appInfo)
-            providerDisplay = new ListSearchResults(provider);
+            providerDisplay = new ListSearchResults(provider, this);
         else
-            providerDisplay = new GridSearchResults(provider, this.actor);
+            providerDisplay = new GridSearchResults(provider, this);
 
         providerDisplay.connect('key-focus-in', Lang.bind(this, this._keyFocusIn));
         providerDisplay.actor.hide();
@@ -647,6 +681,15 @@ const SearchResults = new Lang.Class({
         this._setSelected(this._defaultResult, highlight);
     },
 
+    popupMenuDefault: function() {
+        // If we have a search queued up, force the search now.
+        if (this._searchTimeoutId > 0)
+            this._doSearch();
+
+        if (this._defaultResult)
+            this._defaultResult.actor.popup_menu();
+    },
+
     navigateFocus: function(direction) {
         let rtl = this.actor.get_text_direction() == Clutter.TextDirection.RTL;
         if (direction == Gtk.DirectionType.TAB_BACKWARD ||
@@ -671,14 +714,25 @@ const SearchResults = new Lang.Class({
         } else {
             result.actor.remove_style_pseudo_class('selected');
         }
+    },
+
+    highlightTerms: function(description) {
+        if (!description)
+            return '';
+
+        if (!this._highlightRegex)
+            return description;
+
+        return description.replace(this._highlightRegex, '<b>$1</b>');
     }
 });
+Signals.addSignalMethods(SearchResults.prototype);
 
-const ProviderIcon = new Lang.Class({
-    Name: 'ProviderIcon',
+var ProviderInfo = new Lang.Class({
+    Name: 'ProviderInfo',
     Extends: St.Button,
 
-    PROVIDER_ICON_SIZE: 48,
+    PROVIDER_ICON_SIZE: 32,
 
     _init: function(provider) {
         this.provider = provider;
@@ -688,22 +742,28 @@ const ProviderIcon = new Lang.Class({
                       accessible_name: provider.appInfo.get_name(),
                       track_hover: true });
 
-        this._content = new St.Widget({ layout_manager: new Clutter.BinLayout() });
+        this._content = new St.BoxLayout({ vertical: false,
+                                           style_class: 'list-search-provider-content' });
         this.set_child(this._content);
-
-        let rtl = (this.get_text_direction() == Clutter.TextDirection.RTL);
-
-        this.moreIcon = new St.Widget({ style_class: 'search-provider-icon-more',
-                                        visible: false,
-                                        x_align: rtl ? Clutter.ActorAlign.START : Clutter.ActorAlign.END,
-                                        y_align: Clutter.ActorAlign.END,
-                                        x_expand: true,
-                                        y_expand: true });
 
         let icon = new St.Icon({ icon_size: this.PROVIDER_ICON_SIZE,
                                  gicon: provider.appInfo.get_icon() });
+
+        let detailsBox = new St.BoxLayout({ style_class: 'list-search-provider-details',
+                                            vertical: true,
+                                            x_expand: true });
+
+        let nameLabel = new St.Label({ text: provider.appInfo.get_name(),
+                                       x_align: Clutter.ActorAlign.START });
+
+        this._moreLabel = new St.Label({ x_align: Clutter.ActorAlign.START });
+
+        detailsBox.add_actor(nameLabel);
+        detailsBox.add_actor(this._moreLabel);
+
+
         this._content.add_actor(icon);
-        this._content.add_actor(this.moreIcon);
+        this._content.add_actor(detailsBox);
     },
 
     animateLaunch: function() {
@@ -711,5 +771,10 @@ const ProviderIcon = new Lang.Class({
         let app = appSys.lookup_app(this.provider.appInfo.get_id());
         if (app.state == Shell.AppState.STOPPED)
             IconGrid.zoomOutActor(this._content);
+    },
+
+    setMoreCount: function(count) {
+        this._moreLabel.text = ngettext("%d more", "%d more", count).format(count);
+        this._moreLabel.visible = count > 0;
     }
 });

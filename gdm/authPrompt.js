@@ -3,6 +3,7 @@
 const Clutter = imports.gi.Clutter;
 const Gio = imports.gi.Gio;
 const Lang = imports.lang;
+const Pango = imports.gi.Pango;
 const Signals = imports.signals;
 const St = imports.gi.St;
 
@@ -14,30 +15,30 @@ const ShellEntry = imports.ui.shellEntry;
 const Tweener = imports.ui.tweener;
 const UserWidget = imports.ui.userWidget;
 
-const DEFAULT_BUTTON_WELL_ICON_SIZE = 16;
-const DEFAULT_BUTTON_WELL_ANIMATION_DELAY = 1.0;
-const DEFAULT_BUTTON_WELL_ANIMATION_TIME = 0.3;
+var DEFAULT_BUTTON_WELL_ICON_SIZE = 16;
+var DEFAULT_BUTTON_WELL_ANIMATION_DELAY = 1.0;
+var DEFAULT_BUTTON_WELL_ANIMATION_TIME = 0.3;
 
-const MESSAGE_FADE_OUT_ANIMATION_TIME = 0.5;
+var MESSAGE_FADE_OUT_ANIMATION_TIME = 0.5;
 
-const AuthPromptMode = {
+var AuthPromptMode = {
     UNLOCK_ONLY: 0,
     UNLOCK_OR_LOG_IN: 1
 };
 
-const AuthPromptStatus = {
+var AuthPromptStatus = {
     NOT_VERIFYING: 0,
     VERIFYING: 1,
     VERIFICATION_FAILED: 2,
     VERIFICATION_SUCCEEDED: 3
 };
 
-const BeginRequestType = {
+var BeginRequestType = {
     PROVIDE_USERNAME: 0,
     DONT_PROVIDE_USERNAME: 1
 };
 
-const AuthPrompt = new Lang.Class({
+var AuthPrompt = new Lang.Class({
     Name: 'AuthPrompt',
 
     _init: function(gdmClient, mode) {
@@ -113,6 +114,7 @@ const AuthPrompt = new Lang.Class({
         this._message = new St.Label({ opacity: 0,
                                        styleClass: 'login-dialog-message' });
         this._message.clutter_text.line_wrap = true;
+        this._message.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
         this.actor.add(this._message, { x_fill: false, x_align: St.Align.START, y_align: St.Align.START });
 
         this._buttonBox = new St.BoxLayout({ style_class: 'login-dialog-button-box',
@@ -186,7 +188,7 @@ const AuthPrompt = new Lang.Class({
                                              if (!this._userVerifier.hasPendingMessages)
                                                  this._fadeOutMessage();
 
-                                             this._updateNextButtonSensitivity(this._entry.text.length > 0);
+                                             this._updateNextButtonSensitivity(this._entry.text.length > 0 || this.verificationStatus == AuthPromptStatus.VERIFYING);
                                          }));
         this._entry.clutter_text.connect('activate', Lang.bind(this, function() {
             if (this.nextButton.reactive)
@@ -261,7 +263,7 @@ const AuthPrompt = new Lang.Class({
     _onVerificationComplete: function() {
         this.setActorInDefaultButtonWell(null);
         this.verificationStatus = AuthPromptStatus.VERIFICATION_SUCCEEDED;
-	this.cancelButton.reactive = false;
+        this.cancelButton.reactive = false;
     },
 
     _onReset: function() {
@@ -414,7 +416,7 @@ const AuthPrompt = new Lang.Class({
     },
 
     updateSensitivity: function(sensitive) {
-        this._updateNextButtonSensitivity(sensitive && this._entry.text.length > 0);
+        this._updateNextButtonSensitivity(sensitive && (this._entry.text.length > 0 || this.verificationStatus == AuthPromptStatus.VERIFYING));
         this._entry.reactive = sensitive;
         this._entry.clutter_text.editable = sensitive;
     },

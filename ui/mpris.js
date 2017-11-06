@@ -36,6 +36,8 @@ const MprisPlayerIface = '<node> \
   <method name="PlayPause" /> \
   <method name="Next" /> \
   <method name="Previous" /> \
+  <property name="CanGoNext" type="b" access="read" /> \
+  <property name="CanGoPrevious" type="b" access="read" /> \
   <property name="CanPlay" type="b" access="read" /> \
   <property name="Metadata" type="a{sv}" access="read" /> \
   <property name="PlaybackStatus" type="s" access="read" /> \
@@ -45,7 +47,7 @@ const MprisPlayerProxy = Gio.DBusProxy.makeProxyWrapper(MprisPlayerIface);
 
 const MPRIS_PLAYER_PREFIX = 'org.mpris.MediaPlayer2.';
 
-const MediaMessage = new Lang.Class({
+var MediaMessage = new Lang.Class({
     Name: 'MediaMessage',
     Extends: MessageList.Message,
 
@@ -57,7 +59,7 @@ const MediaMessage = new Lang.Class({
         this._icon = new St.Icon({ style_class: 'media-message-cover-icon' });
         this.setIcon(this._icon);
 
-        this.addMediaControl('media-skip-backward-symbolic',
+        this._prevButton = this.addMediaControl('media-skip-backward-symbolic',
             Lang.bind(this, function() {
                 this._player.previous();
             }));
@@ -67,7 +69,7 @@ const MediaMessage = new Lang.Class({
                 this._player.playPause();
             }));
 
-        this.addMediaControl('media-skip-forward-symbolic',
+        this._nextButton = this.addMediaControl('media-skip-forward-symbolic',
             Lang.bind(this, function() {
                 this._player.next();
             }));
@@ -80,6 +82,10 @@ const MediaMessage = new Lang.Class({
     _onClicked: function() {
         this._player.raise();
         Main.panel.closeCalendar();
+    },
+
+    _updateNavButton: function(button, sensitive) {
+        button.reactive = sensitive;
     },
 
     _update: function() {
@@ -99,10 +105,13 @@ const MediaMessage = new Lang.Class({
         let iconName = isPlaying ? 'media-playback-pause-symbolic'
                                  : 'media-playback-start-symbolic';
         this._playPauseButton.child.icon_name = iconName;
+
+        this._updateNavButton(this._prevButton, this._player.canGoPrevious);
+        this._updateNavButton(this._nextButton, this._player.canGoNext);
     }
 });
 
-const MprisPlayer = new Lang.Class({
+var MprisPlayer = new Lang.Class({
     Name: 'MprisPlayer',
 
     _init: function(busName) {
@@ -139,8 +148,16 @@ const MprisPlayer = new Lang.Class({
         this._playerProxy.PlayPauseRemote();
     },
 
+    get canGoNext() {
+        return this._playerProxy.CanGoNext;
+    },
+
     next: function() {
         this._playerProxy.NextRemote();
+    },
+
+    get canGoPrevious() {
+        return this._playerProxy.CanGoPrevious;
     },
 
     previous: function() {
@@ -209,12 +226,12 @@ const MprisPlayer = new Lang.Class({
 });
 Signals.addSignalMethods(MprisPlayer.prototype);
 
-const MediaSection = new Lang.Class({
+var MediaSection = new Lang.Class({
     Name: 'MediaSection',
     Extends: MessageList.MessageListSection,
 
     _init: function() {
-        this.parent(_("Media"));
+        this.parent();
 
         this._players = new Map();
 

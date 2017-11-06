@@ -5,6 +5,7 @@ const GLib = imports.gi.GLib;
 const GObject = imports.gi.GObject;
 const Gio = imports.gi.Gio;
 const Gtk = imports.gi.Gtk;
+const Gdk = imports.gi.Gdk;
 const Pango = imports.gi.Pango;
 const Format = imports.format;
 
@@ -31,7 +32,7 @@ function stripPrefix(string, prefix) {
     return string;
 }
 
-const Application = new Lang.Class({
+var Application = new Lang.Class({
     Name: 'Application',
     _init: function() {
         GLib.set_prgname('gnome-shell-extension-prefs');
@@ -92,9 +93,11 @@ const Application = new Lang.Class({
             widget = this._buildErrorUI(extension, e);
         }
 
-        let dialog = new Gtk.Dialog({ use_header_bar: true,
-                                      modal: true,
-                                      title: extension.metadata.name });
+        let dialog = new Gtk.Window({ modal: !this._skipMainWindow,
+                                      type_hint: Gdk.WindowTypeHint.DIALOG });
+        dialog.set_titlebar(new Gtk.HeaderBar({ show_close_button: true,
+                                                title: extension.metadata.name,
+                                                visible: true }));
 
         if (this._skipMainWindow) {
             this.application.add_window(dialog);
@@ -107,7 +110,7 @@ const Application = new Lang.Class({
         }
 
         dialog.set_default_size(600, 400);
-        dialog.get_content_area().add(widget);
+        dialog.add(widget);
         dialog.show();
     },
 
@@ -143,17 +146,21 @@ const Application = new Lang.Class({
         this._window = new Gtk.ApplicationWindow({ application: app,
                                                    window_position: Gtk.WindowPosition.CENTER });
 
-        this._window.set_size_request(800, 500);
+        this._window.set_default_size(800, 500);
 
         this._titlebar = new Gtk.HeaderBar({ show_close_button: true,
-                                             title: _("GNOME Shell Extensions") });
+                                             title: _("Shell Extensions") });
         this._window.set_titlebar(this._titlebar);
 
-        let scroll = new Gtk.ScrolledWindow({ hscrollbar_policy: Gtk.PolicyType.NEVER,
-                                              shadow_type: Gtk.ShadowType.IN,
-                                              halign: Gtk.Align.CENTER,
-                                              propagate_natural_width: true,
-                                              margin: 18 });
+        let killSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
+        this._titlebar.pack_end(killSwitch);
+
+        this._settings = new Gio.Settings({ schema_id: 'org.gnome.shell' });
+        this._settings.bind('disable-user-extensions', killSwitch, 'active',
+                            Gio.SettingsBindFlags.DEFAULT |
+                            Gio.SettingsBindFlags.INVERT_BOOLEAN);
+
+        let scroll = new Gtk.ScrolledWindow({ hscrollbar_policy: Gtk.PolicyType.NEVER });
         this._window.add(scroll);
 
         this._extensionSelector = new Gtk.ListBox({ selection_mode: Gtk.SelectionMode.NONE });
@@ -246,7 +253,19 @@ const Application = new Lang.Class({
     }
 });
 
-const ExtensionRow = new Lang.Class({
+var DescriptionLabel = new Lang.Class({
+    Name: 'DescriptionLabel',
+    Extends: Gtk.Label,
+
+    vfunc_get_preferred_height_for_width: function(width) {
+        // Hack: Request the maximum height allowed by the line limit
+        if (this.lines > 0)
+            return this.parent(0);
+        return this.parent(width);
+    }
+});
+
+var ExtensionRow = new Lang.Class({
     Name: 'ExtensionRow',
     Extends: Gtk.ListBoxRow,
 
@@ -264,6 +283,10 @@ const ExtensionRow = new Lang.Class({
             Lang.bind(this, function() {
                 this._switch.sensitive = this._canEnable();
             }));
+        this._settings.connect('changed::disable-user-extensions',
+            Lang.bind(this, function() {
+                this._switch.sensitive = this._canEnable();
+            }));
 
         this._buildUI();
     },
@@ -272,7 +295,8 @@ const ExtensionRow = new Lang.Class({
         let extension = ExtensionUtils.extensions[this.uuid];
 
         let hbox = new Gtk.Box({ orientation: Gtk.Orientation.HORIZONTAL,
-                                 hexpand: true, margin: 12, spacing: 6 });
+                                 hexpand: true, margin_end: 24, spacing: 24,
+                                 margin: 12 });
         this.add(hbox);
 
         let vbox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL,
@@ -286,9 +310,9 @@ const ExtensionRow = new Lang.Class({
         vbox.add(label);
 
         let desc = extension.metadata.description.split('\n')[0];
-        label = new Gtk.Label({ label: desc,
-                                ellipsize: Pango.EllipsizeMode.END,
-                                halign: Gtk.Align.START });
+        label = new DescriptionLabel({ label: desc, wrap: true, lines: 2,
+                                       ellipsize: Pango.EllipsizeMode.END,
+                                       xalign: 0, yalign: 0 });
         vbox.add(label);
 
         let button = new Gtk.Button({ valign: Gtk.Align.CENTER,
@@ -319,7 +343,8 @@ const ExtensionRow = new Lang.Class({
         let extension = ExtensionUtils.extensions[this.uuid];
         let checkVersion = !this._settings.get_boolean('disable-extension-version-validation');
 
-        return !(checkVersion && ExtensionUtils.isOutOfDate(extension));
+        return !this._settings.get_boolean('disable-user-extensions') &&
+               !(checkVersion && ExtensionUtils.isOutOfDate(extension));
     },
 
     _isEnabled: function() {

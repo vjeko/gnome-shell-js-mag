@@ -33,18 +33,21 @@ const SCREENSAVER_SCHEMA = 'org.gnome.desktop.screensaver';
 const LOCK_ENABLED_KEY = 'lock-enabled';
 const LOCK_DELAY_KEY = 'lock-delay';
 
+const LOCKDOWN_SCHEMA = 'org.gnome.desktop.lockdown';
+const DISABLE_LOCK_KEY = 'disable-lock-screen';
+
 const LOCKED_STATE_STR = 'screenShield.locked';
 // fraction of screen height the arrow must reach before completing
 // the slide up automatically
-const ARROW_DRAG_THRESHOLD = 0.1;
+var ARROW_DRAG_THRESHOLD = 0.1;
 
 // Parameters for the arrow animation
-const N_ARROWS = 3;
-const ARROW_ANIMATION_TIME = 0.6;
-const ARROW_ANIMATION_PEAK_OPACITY = 0.4;
-const ARROW_IDLE_TIME = 30000; // ms
+var N_ARROWS = 3;
+var ARROW_ANIMATION_TIME = 0.6;
+var ARROW_ANIMATION_PEAK_OPACITY = 0.4;
+var ARROW_IDLE_TIME = 30000; // ms
 
-const SUMMARY_ICON_SIZE = 48;
+var SUMMARY_ICON_SIZE = 48;
 
 // ScreenShield animation time
 // - STANDARD_FADE_TIME is used when the session goes idle
@@ -52,12 +55,12 @@ const SUMMARY_ICON_SIZE = 48;
 //   or when cancelling the dialog
 // - BACKGROUND_FADE_TIME is used when the background changes to crossfade to new background
 // - CURTAIN_SLIDE_TIME is used when raising the shield before unlocking
-const STANDARD_FADE_TIME = 10;
-const MANUAL_FADE_TIME = 0.3;
-const BACKGROUND_FADE_TIME = 1.0;
-const CURTAIN_SLIDE_TIME = 0.3;
+var STANDARD_FADE_TIME = 10;
+var MANUAL_FADE_TIME = 0.3;
+var BACKGROUND_FADE_TIME = 1.0;
+var CURTAIN_SLIDE_TIME = 0.3;
 
-const Clock = new Lang.Class({
+var Clock = new Lang.Class({
     Name: 'ScreenShieldClock',
 
     _init: function() {
@@ -92,7 +95,7 @@ const Clock = new Lang.Class({
     }
 });
 
-const NotificationsBox = new Lang.Class({
+var NotificationsBox = new Lang.Class({
     Name: 'NotificationsBox',
 
     _init: function() {
@@ -342,7 +345,7 @@ const NotificationsBox = new Lang.Class({
 });
 Signals.addSignalMethods(NotificationsBox.prototype);
 
-const Arrow = new Lang.Class({
+var Arrow = new Lang.Class({
     Name: 'Arrow',
     Extends: St.Bin,
 
@@ -428,7 +431,7 @@ function clamp(value, min, max) {
  * This will ensure that the screen blanks at the right time when it fades out.
  * https://bugzilla.gnome.org/show_bug.cgi?id=668703 explains the dependency.
  */
-const ScreenShield = new Lang.Class({
+var ScreenShield = new Lang.Class({
     Name: 'ScreenShield',
 
     _init: function() {
@@ -540,6 +543,9 @@ const ScreenShield = new Lang.Class({
 
         this._settings = new Gio.Settings({ schema_id: SCREENSAVER_SCHEMA });
         this._settings.connect('changed::' + LOCK_ENABLED_KEY, Lang.bind(this, this._syncInhibitor));
+
+        this._lockSettings = new Gio.Settings({ schema_id: LOCKDOWN_SCHEMA });
+        this._lockSettings.connect('changed::' + DISABLE_LOCK_KEY, Lang.bind(this, this._syncInhibitor));
 
         this._isModal = false;
         this._hasLockScreen = false;
@@ -665,7 +671,10 @@ const ScreenShield = new Lang.Class({
         let isEnter = (symbol == Clutter.KEY_Return ||
                        symbol == Clutter.KEY_KP_Enter ||
                        symbol == Clutter.KEY_ISO_Enter);
-        if (!isEnter && !(GLib.unichar_isprint(unichar) || symbol == Clutter.KEY_Escape))
+        let isEscape = (symbol == Clutter.KEY_Escape);
+        let isLiftChar = (GLib.unichar_isprint(unichar) &&
+                          (this._isLocked || !GLib.unichar_isgraph(unichar)));
+        if (!isEnter && !isEscape && !isLiftChar)
             return Clutter.EVENT_PROPAGATE;
 
         if (this._isLocked &&
@@ -698,8 +707,10 @@ const ScreenShield = new Lang.Class({
     },
 
     _syncInhibitor: function() {
+        let lockEnabled = this._settings.get_boolean(LOCK_ENABLED_KEY);
+        let lockLocked = this._lockSettings.get_boolean(DISABLE_LOCK_KEY);
         let inhibit = (this._loginSession && this._loginSession.Active &&
-                       !this._isActive && this._settings.get_boolean(LOCK_ENABLED_KEY));
+                       !this._isActive && lockEnabled && !lockLocked);
         if (inhibit) {
             this._loginManager.inhibit(_("GNOME needs to lock the screen"),
                                        Lang.bind(this, function(inhibitor) {
@@ -1287,6 +1298,11 @@ const ScreenShield = new Lang.Class({
     },
 
     lock: function(animate) {
+        if (this._lockSettings.get_boolean(DISABLE_LOCK_KEY)) {
+            log('Screen lock is locked down, not locking') // lock, lock - who's there?
+            return;
+        }
+
         // Warn the user if we can't become modal
         if (!this._becomeModal()) {
             Main.notifyError(_("Unable to lock"),

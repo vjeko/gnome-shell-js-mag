@@ -14,34 +14,34 @@ const Main = imports.ui.main;
 const Params = imports.misc.params;
 
 // Time to scale down to maxDragActorSize
-const SCALE_ANIMATION_TIME = 0.25;
+var SCALE_ANIMATION_TIME = 0.25;
 // Time to animate to original position on cancel
-const SNAP_BACK_ANIMATION_TIME = 0.25;
+var SNAP_BACK_ANIMATION_TIME = 0.25;
 // Time to animate to original position on success
-const REVERT_ANIMATION_TIME = 0.75;
+var REVERT_ANIMATION_TIME = 0.75;
 
-const DragMotionResult = {
+var DragMotionResult = {
     NO_DROP:   0,
     COPY_DROP: 1,
     MOVE_DROP: 2,
     CONTINUE:  3
 };
 
-const DRAG_CURSOR_MAP = {
+var DRAG_CURSOR_MAP = {
     0: Meta.Cursor.DND_UNSUPPORTED_TARGET,
     1: Meta.Cursor.DND_COPY,
     2: Meta.Cursor.DND_MOVE
 };
 
-const DragDropResult = {
+var DragDropResult = {
     FAILURE:  0,
     SUCCESS:  1,
     CONTINUE: 2
 };
+var dragMonitors = [];
 
 let eventHandlerActor = null;
 let currentDraggable = null;
-let dragMonitors = [];
 
 function _getEventHandlerActor() {
     if (!eventHandlerActor) {
@@ -69,7 +69,7 @@ function removeDragMonitor(monitor) {
         }
 }
 
-const _Draggable = new Lang.Class({
+var _Draggable = new Lang.Class({
     Name: 'Draggable',
 
     _init : function(actor, params) {
@@ -94,6 +94,7 @@ const _Draggable = new Lang.Class({
             this.disconnectAll();
         }));
         this._onEventId = null;
+        this._touchSequence = null;
 
         this._restoreOnSuccess = params.restoreOnSuccess;
         this._dragActorMaxSize = params.dragActorMaxSize;
@@ -530,7 +531,7 @@ const _Draggable = new Lang.Class({
             // Snap the clone back to its source
             [x, y] = this._dragActorSource.get_transformed_position();
             let [sourceScaledWidth, sourceScaledHeight] = this._dragActorSource.get_transformed_size();
-            scale = this._dragActor.width / sourceScaledWidth;
+            scale = sourceScaledWidth ? this._dragActor.width / sourceScaledWidth : 0;
         } else if (this._dragOrigParent) {
             // Snap the actor back to its original position within
             // its parent, adjusting for the fact that the parent

@@ -20,12 +20,12 @@ const Environment = imports.ui.environment;
 const ExtensionSystem = imports.ui.extensionSystem;
 const ExtensionDownloader = imports.ui.extensionDownloader;
 const Keyboard = imports.ui.keyboard;
-const LegacyTray = imports.ui.legacyTray;
 const MessageTray = imports.ui.messageTray;
 const ModalDialog = imports.ui.modalDialog;
 const OsdWindow = imports.ui.osdWindow;
 const OsdMonitorLabeler = imports.ui.osdMonitorLabeler;
 const Overview = imports.ui.overview;
+const PadOsd = imports.ui.padOsd;
 const Panel = imports.ui.panel;
 const Params = imports.misc.params;
 const RunDialog = imports.ui.runDialog;
@@ -49,35 +49,35 @@ const A11Y_SCHEMA = 'org.gnome.desktop.a11y.keyboard';
 const STICKY_KEYS_ENABLE = 'stickykeys-enable';
 const GNOMESHELL_STARTED_MESSAGE_ID = 'f3ea493c22934e26811cd62abe8e203a';
 
-let componentManager = null;
-let panel = null;
-let overview = null;
-let runDialog = null;
-let lookingGlass = null;
-let wm = null;
-let legacyTray = null;
-let messageTray = null;
-let screenShield = null;
-let notificationDaemon = null;
-let windowAttentionHandler = null;
-let ctrlAltTabManager = null;
-let osdWindowManager = null;
-let osdMonitorLabeler = null;
-let sessionMode = null;
-let shellAccessDialogDBusService = null;
-let shellAudioSelectionDBusService = null;
-let shellDBusService = null;
-let shellMountOpDBusService = null;
-let screenSaverDBus = null;
-let screencastService = null;
-let modalCount = 0;
-let actionMode = Shell.ActionMode.NONE;
-let modalActorFocusStack = [];
-let uiGroup = null;
-let magnifier = null;
-let xdndHandler = null;
-let keyboard = null;
-let layoutManager = null;
+var componentManager = null;
+var panel = null;
+var overview = null;
+var runDialog = null;
+var lookingGlass = null;
+var wm = null;
+var messageTray = null;
+var screenShield = null;
+var notificationDaemon = null;
+var windowAttentionHandler = null;
+var ctrlAltTabManager = null;
+var padOsdService = null;
+var osdWindowManager = null;
+var osdMonitorLabeler = null;
+var sessionMode = null;
+var shellAccessDialogDBusService = null;
+var shellAudioSelectionDBusService = null;
+var shellDBusService = null;
+var shellMountOpDBusService = null;
+var screenSaverDBus = null;
+var screencastService = null;
+var modalCount = 0;
+var actionMode = Shell.ActionMode.NONE;
+var modalActorFocusStack = [];
+var uiGroup = null;
+var magnifier = null;
+var xdndHandler = null;
+var keyboard = null;
+var layoutManager = null;
 let _startDate;
 let _defaultCssStylesheet = null;
 let _cssStylesheet = null;
@@ -122,6 +122,7 @@ function start() {
     sessionMode.connect('updated', _sessionUpdated);
     Gtk.Settings.get_default().connect('notify::gtk-theme-name',
                                        _loadDefaultStylesheet);
+    Gtk.IconTheme.get_default().add_resource_path('/org/gnome/shell/theme/icons');
     _initializeUI();
 
     shellAccessDialogDBusService = new AccessDialog.AccessDialogDBus();
@@ -155,6 +156,7 @@ function _initializeUI() {
     // working until it's updated.
     uiGroup = layoutManager.uiGroup;
 
+    padOsdService = new PadOsd.PadOsdService();
     screencastService = new Screencast.ScreencastService();
     xdndHandler = new XdndHandler.XdndHandler();
     ctrlAltTabManager = new CtrlAltTab.CtrlAltTabManager();
@@ -166,7 +168,6 @@ function _initializeUI() {
     if (LoginManager.canLock())
         screenShield = new ScreenShield.ScreenShield();
 
-    legacyTray = new LegacyTray.LegacyTray();
     messageTray = new MessageTray.MessageTray();
     panel = new Panel.Panel();
     keyboard = new Keyboard.Keyboard();
@@ -549,7 +550,7 @@ function activateWindow(window, time, workspaceNum) {
 
 // TODO - replace this timeout with some system to guess when the user might
 // be e.g. just reading the screen and not likely to interact.
-const DEFERRED_TIMEOUT_SECONDS = 20;
+var DEFERRED_TIMEOUT_SECONDS = 20;
 var _deferredWorkData = {};
 // Work scheduled for some point in the future
 var _deferredWorkQueue = [];
@@ -666,7 +667,7 @@ function queueDeferredWork(workId) {
     }
 }
 
-const RestartMessage = new Lang.Class({
+var RestartMessage = new Lang.Class({
     Name: 'RestartMessage',
     Extends: ModalDialog.ModalDialog,
 

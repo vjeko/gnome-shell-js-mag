@@ -8,6 +8,7 @@ const Gtk = imports.gi.Gtk;
 const GWeather = imports.gi.GWeather;
 const Lang = imports.lang;
 const Mainloop = imports.mainloop;
+const Pango = imports.gi.Pango;
 const Cairo = imports.cairo;
 const Clutter = imports.gi.Clutter;
 const Shell = imports.gi.Shell;
@@ -20,6 +21,8 @@ const Main = imports.ui.main;
 const PanelMenu = imports.ui.panelMenu;
 const PopupMenu = imports.ui.popupMenu;
 const Calendar = imports.ui.calendar;
+const Weather = imports.misc.weather;
+const System = imports.system;
 
 function _isToday(date) {
     let now = new Date();
@@ -28,7 +31,7 @@ function _isToday(date) {
            now.getDate() == date.getDate();
 }
 
-const TodayButton = new Lang.Class({
+var TodayButton = new Lang.Class({
     Name: 'TodayButton',
 
     _init: function(calendar) {
@@ -36,7 +39,7 @@ const TodayButton = new Lang.Class({
         // on the current date can be confusing. So don't make the button reactive
         // until the selected date changes.
         this.actor = new St.Button({ style_class: 'datemenu-today-button',
-                                     x_align: St.Align.START,
+                                     x_expand: true, x_align: St.Align.START,
                                      can_focus: true,
                                      reactive: false
                                    });
@@ -77,19 +80,17 @@ const TodayButton = new Lang.Class({
          * below the time in the shell; it should combine the weekday and the
          * date, e.g. "Tuesday February 17 2015".
          */
-        let dateFormat = Shell.util_translate_time_string (N_("%A %B %e %Y"));
+        dateFormat = Shell.util_translate_time_string (N_("%A %B %e %Y"));
         this.actor.accessible_name = date.toLocaleFormat(dateFormat);
     }
 });
 
-const WorldClocksSection = new Lang.Class({
+var WorldClocksSection = new Lang.Class({
     Name: 'WorldClocksSection',
 
     _init: function() {
         this._clock = new GnomeDesktop.WallClock();
-        this._settings = null;
         this._clockNotifyId = 0;
-        this._changedId = 0;
 
         this._locations = [];
 
@@ -98,8 +99,7 @@ const WorldClocksSection = new Lang.Class({
                                      can_focus: true });
         this.actor.connect('clicked', Lang.bind(this,
             function() {
-                let app = this._getClockApp();
-                app.activate();
+                this._clockAppMon.activateApp();
 
                 Main.overview.hide();
                 Main.panel.closeCalendar();
@@ -112,40 +112,25 @@ const WorldClocksSection = new Lang.Class({
 
         this.actor.child = this._grid;
 
-        Shell.AppSystem.get_default().connect('installed-changed',
-                                              Lang.bind(this, this._sync));
+        this._clockAppMon = new Util.AppSettingsMonitor('org.gnome.clocks.desktop',
+                                                        'org.gnome.clocks');
+        this._clockAppMon.connect('available-changed',
+                                  Lang.bind(this, this._sync));
+        this._clockAppMon.watchSetting('world-clocks',
+                                       Lang.bind(this, this._clocksChanged));
         this._sync();
     },
 
-    _getClockApp: function() {
-        return Shell.AppSystem.get_default().lookup_app('org.gnome.clocks.desktop');
-    },
-
     _sync: function() {
-        this.actor.visible = (this._getClockApp() != null);
-
-        if (this.actor.visible) {
-            if (!this._settings) {
-                this._settings = new Gio.Settings({ schema_id: 'org.gnome.clocks' });
-                this._changedId =
-                    this._settings.connect('changed::world-clocks',
-                                           Lang.bind(this, this._clocksChanged));
-                this._clocksChanged();
-            }
-        } else {
-            if (this._settings)
-                this._settings.disconnect(this._changedId);
-            this._settings = null;
-            this._changedId = 0;
-        }
+        this.actor.visible = this._clockAppMon.available;
     },
 
-    _clocksChanged: function() {
+    _clocksChanged: function(settings) {
         this._grid.destroy_all_children();
         this._locations = [];
 
         let world = GWeather.Location.get_world();
-        let clocks = this._settings.get_value('world-clocks').deep_unpack();
+        let clocks = settings.get_value('world-clocks').deep_unpack();
         for (let i = 0; i < clocks.length; i++) {
             let l = world.deserialize(clocks[i].location);
             this._locations.push({ location: l });
@@ -210,12 +195,155 @@ const WorldClocksSection = new Lang.Class({
     }
 });
 
-const MessagesIndicator = new Lang.Class({
+var WeatherSection = new Lang.Class({
+    Name: 'WeatherSection',
+
+    _init: function() {
+        this._weatherClient = new Weather.WeatherClient();
+
+        this.actor = new St.Button({ style_class: 'weather-button',
+                                     x_fill: true,
+                                     can_focus: true });
+        this.actor.connect('clicked', () => {
+            this._weatherClient.activateApp();
+
+            Main.overview.hide();
+            Main.panel.closeCalendar();
+        });
+        this.actor.connect('notify::mapped', () => {
+            if (this.actor.mapped)
+                this._weatherClient.update();
+        });
+
+        let box = new St.BoxLayout({ style_class: 'weather-box',
+                                      vertical: true });
+
+        this.actor.child = box;
+
+        box.add_child(new St.Label({ style_class: 'weather-header',
+                                     x_align: Clutter.ActorAlign.START,
+                                     text: _("Weather") }));
+
+        this._conditionsLabel = new St.Label({ style_class: 'weather-conditions',
+                                               x_align: Clutter.ActorAlign.START });
+        this._conditionsLabel.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+        this._conditionsLabel.clutter_text.line_wrap = true;
+        box.add_child(this._conditionsLabel);
+
+        this._weatherClient.connect('changed', Lang.bind(this, this._sync));
+        this._sync();
+    },
+
+    _getSummary: function(info, capitalize=false) {
+        let options = capitalize ? GWeather.FormatOptions.SENTENCE_CAPITALIZATION
+                                 : GWeather.FormatOptions.NO_CAPITALIZATION;
+
+        let [ok, phenomenon, qualifier] = info.get_value_conditions();
+        if (ok)
+            return new GWeather.Conditions({ significant: true,
+                                             phenomenon,
+                                             qualifier }).to_string_full(options);
+
+        let [, sky] = info.get_value_sky();
+        return GWeather.Sky.to_string_full(sky, options);
+    },
+
+    _sameSummary: function(info1, info2) {
+        let [ok1, phenom1, qualifier1] = info1.get_value_conditions();
+        let [ok2, phenom2, qualifier2] = info2.get_value_conditions();
+        if (ok1 || ok2)
+            return ok1 == ok2 && phenom1 == phenom2 && qualifier1 == qualifier2;
+
+        let [, sky1] = info1.get_value_sky();
+        let [, sky2] = info2.get_value_sky();
+        return sky1 == sky2;
+    },
+
+    _getSummaryText: function() {
+        let info = this._weatherClient.info;
+        let forecasts = info.get_forecast_list();
+        if (forecasts.length == 0) // No forecasts, just current conditions
+            return '%s.'.format(this._getSummary(info, true));
+
+        let current = info;
+        let infos = [info];
+        for (let i = 0; i < forecasts.length; i++) {
+            let [ok, timestamp] = forecasts[i].get_value_update();
+            if (!_isToday(new Date(timestamp * 1000)))
+                continue; // Ignore forecasts from other days
+
+            if (this._sameSummary(current, forecasts[i]))
+                continue; // Ignore consecutive runs of equal summaries
+
+            current = forecasts[i];
+            if (infos.push(current) == 3)
+                break; // Use a maximum of three summaries
+        }
+
+        let fmt;
+        switch(infos.length) {
+            /* Translators: %s is a weather condition like "Clear sky"; see
+               libgweather for the possible condition strings. If at all
+               possible, the sentence should match the grammatical case etc. of
+               the inserted conditions. */
+            case 1: fmt = _("%s all day."); break;
+
+            /* Translators: %s is a weather condition like "Clear sky"; see
+               libgweather for the possible condition strings. If at all
+               possible, the sentence should match the grammatical case etc. of
+               the inserted conditions. */
+            case 2: fmt = _("%s, then %s later."); break;
+
+            /* Translators: %s is a weather condition like "Clear sky"; see
+               libgweather for the possible condition strings. If at all
+               possible, the sentence should match the grammatical case etc. of
+               the inserted conditions. */
+            case 3: fmt = _("%s, then %s, followed by %s later."); break;
+        }
+        let summaries = infos.map((info, i) => {
+            let capitalize = i == 0 && fmt.startsWith('%s');
+            return this._getSummary(info, capitalize);
+        });
+        return String.prototype.format.apply(fmt, summaries);
+    },
+
+    _getLabelText: function() {
+        if (!this._weatherClient.hasLocation)
+            return _("Select a location…");
+
+        if (this._weatherClient.loading)
+            return _("Loading…");
+
+        let info = this._weatherClient.info;
+        if (info.is_valid())
+            return this._getSummaryText() + ' ' +
+                   /* Translators: %s is a temperature with unit, e.g. "23℃" */
+                   _("Feels like %s.").format(info.get_apparent());
+
+        if (info.network_error())
+            return _("Go online for weather information");
+
+        return _("Weather information is currently unavailable");
+    },
+
+    _sync: function() {
+        this.actor.visible = this._weatherClient.available;
+
+        if (!this.actor.visible)
+            return;
+
+        this._conditionsLabel.text = this._getLabelText();
+    }
+});
+
+var MessagesIndicator = new Lang.Class({
     Name: 'MessagesIndicator',
 
     _init: function() {
-        this.actor = new St.Label({ text: '⚫', visible: false, y_expand: true,
-                                    y_align: Clutter.ActorAlign.CENTER });
+        this.actor = new St.Icon({ icon_name: 'message-indicator-symbolic',
+                                   icon_size: 16,
+                                   visible: false, y_expand: true,
+                                   y_align: Clutter.ActorAlign.CENTER });
 
         this._sources = [];
 
@@ -250,14 +378,13 @@ const MessagesIndicator = new Lang.Class({
     }
 });
 
-const IndicatorPad = new Lang.Class({
+var IndicatorPad = new Lang.Class({
     Name: 'IndicatorPad',
     Extends: St.Widget,
 
     _init: function(actor) {
         this._source = actor;
-        this._source.connect('notify::visible',
-                             Lang.bind(this, this.queue_relayout));
+        this._source.connect('notify::visible', () => { this.queue_relayout(); });
         this.parent();
     },
 
@@ -274,7 +401,7 @@ const IndicatorPad = new Lang.Class({
     }
 });
 
-const FreezableBinLayout = new Lang.Class({
+var FreezableBinLayout = new Lang.Class({
     Name: 'FreezableBinLayout',
     Extends: Clutter.BinLayout,
 
@@ -297,18 +424,42 @@ const FreezableBinLayout = new Lang.Class({
 
     vfunc_get_preferred_width: function(container, forHeight) {
         if (!this._frozen || this._savedWidth.some(isNaN))
-            this._savedWidth = this.parent(container, forHeight);
+            return this.parent(container, forHeight);
         return this._savedWidth;
     },
 
     vfunc_get_preferred_height: function(container, forWidth) {
         if (!this._frozen || this._savedHeight.some(isNaN))
-            this._savedHeight = this.parent(container, forWidth);
+            return this.parent(container, forWidth);
         return this._savedHeight;
+    },
+
+    vfunc_allocate: function(container, allocation, flags) {
+        this.parent(container, allocation, flags);
+
+        let [width, height] = allocation.get_size();
+        this._savedWidth = [width, width];
+        this._savedHeight = [height, height];
     }
 });
 
-const DateMenuButton = new Lang.Class({
+var CalendarColumnLayout = new Lang.Class({
+    Name: 'CalendarColumnLayout',
+    Extends: Clutter.BoxLayout,
+
+    _init: function(actor) {
+        this.parent({ orientation: Clutter.Orientation.VERTICAL });
+        this._calActor = actor;
+    },
+
+    vfunc_get_preferred_width: function(container, forHeight) {
+        if (!this._calActor || this._calActor.get_parent() != container)
+            return this.parent(container, forHeight);
+        return this._calActor.get_preferred_width(forHeight);
+    }
+});
+
+var DateMenuButton = new Lang.Class({
     Name: 'DateMenuButton',
     Extends: PanelMenu.Button,
 
@@ -337,6 +488,8 @@ const DateMenuButton = new Lang.Class({
 
         let layout = new FreezableBinLayout();
         let bin = new St.Widget({ layout_manager: layout });
+        // For some minimal compatibility with PopupMenuItem
+        bin._delegate = this;
         this.menu.box.add_child(bin);
 
         hbox = new St.BoxLayout({ name: 'calendarArea' });
@@ -364,14 +517,16 @@ const DateMenuButton = new Lang.Class({
         hbox.add(this._messageList.actor, { expand: true, y_fill: false, y_align: St.Align.START });
 
         // Fill up the second column
-        vbox = new St.BoxLayout({ style_class: 'datemenu-calendar-column',
-                                  vertical: true });
+        let boxLayout = new CalendarColumnLayout(this._calendar.actor);
+        vbox = new St.Widget({ style_class: 'datemenu-calendar-column',
+                               layout_manager: boxLayout });
+        boxLayout.hookup_style(vbox);
         hbox.add(vbox);
 
         this._date = new TodayButton(this._calendar);
         vbox.add_actor(this._date.actor);
 
-        vbox.add(this._calendar.actor);
+        vbox.add_actor(this._calendar.actor);
 
         this._displaysSection = new St.ScrollView({ style_class: 'datemenu-displays-section vfade',
                                                     x_expand: true, x_fill: true,
@@ -386,11 +541,14 @@ const DateMenuButton = new Lang.Class({
         this._clocksItem = new WorldClocksSection();
         displaysBox.add(this._clocksItem.actor, { x_fill: true });
 
+        this._weatherItem = new WeatherSection();
+        displaysBox.add(this._weatherItem.actor, { x_fill: true });
 
         // Done with hbox for calendar and event list
 
         this._clock = new GnomeDesktop.WallClock();
         this._clock.bind_property('clock', this._clockDisplay, 'text', GObject.BindingFlags.SYNC_CREATE);
+        this._clock.connect('notify::timezone', Lang.bind(this, this._updateTimeZone));
 
         Main.sessionMode.connect('updated', Lang.bind(this, this._sessionUpdated));
         this._sessionUpdated();
@@ -408,6 +566,15 @@ const DateMenuButton = new Lang.Class({
         this._messageList.setEventSource(eventSource);
 
         this._eventSource = eventSource;
+    },
+
+    _updateTimeZone: function() {
+        // SpiderMonkey caches the time zone so we must explicitly clear it
+        // before we can update the calendar, see
+        // https://bugzilla.gnome.org/show_bug.cgi?id=678507
+        System.clearDateCaches();
+
+        this._calendar.updateTimeZone();
     },
 
     _sessionUpdated: function() {

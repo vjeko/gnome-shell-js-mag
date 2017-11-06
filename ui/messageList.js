@@ -15,9 +15,9 @@ const Calendar = imports.ui.calendar;
 const Tweener = imports.ui.tweener;
 const Util = imports.misc.util;
 
-const MESSAGE_ANIMATION_TIME = 0.1;
+var MESSAGE_ANIMATION_TIME = 0.1;
 
-const DEFAULT_EXPAND_LINES = 6;
+var DEFAULT_EXPAND_LINES = 6;
 
 function _fixMarkup(text, allowMarkup) {
     if (allowMarkup) {
@@ -39,7 +39,7 @@ function _fixMarkup(text, allowMarkup) {
     return GLib.markup_escape_text(text, -1);
 }
 
-const URLHighlighter = new Lang.Class({
+var URLHighlighter = new Lang.Class({
     Name: 'URLHighlighter',
 
     _init: function(text, lineWrap, allowMarkup) {
@@ -161,9 +161,14 @@ const URLHighlighter = new Lang.Class({
     }
 });
 
-const ScaleLayout = new Lang.Class({
+var ScaleLayout = new Lang.Class({
     Name: 'ScaleLayout',
     Extends: Clutter.BinLayout,
+
+    _init: function(params) {
+        this._container = null;
+        this.parent(params);
+    },
 
     _connectContainer: function(container) {
         if (this._container == container)
@@ -203,7 +208,7 @@ const ScaleLayout = new Lang.Class({
     }
 });
 
-const LabelExpanderLayout = new Lang.Class({
+var LabelExpanderLayout = new Lang.Class({
     Name: 'LabelExpanderLayout',
     Extends: Clutter.LayoutManager,
     Properties: { 'expansion': GObject.ParamSpec.double('expansion',
@@ -293,11 +298,13 @@ const LabelExpanderLayout = new Lang.Class({
     }
 });
 
-const Message = new Lang.Class({
+var Message = new Lang.Class({
     Name: 'Message',
 
     _init: function(title, body) {
         this.expanded = false;
+
+        this._useBodyMarkup = false;
 
         this.actor = new St.Button({ style_class: 'message',
                                      accessible_role: Atk.Role.NOTIFICATION,
@@ -318,6 +325,7 @@ const Message = new Lang.Class({
 
         this._iconBin = new St.Bin({ style_class: 'message-icon-bin',
                                      y_expand: true,
+                                     y_align: St.Align.START,
                                      visible: false });
         hbox.add_actor(this._iconBin);
 
@@ -331,18 +339,18 @@ const Message = new Lang.Class({
         let titleBox = new St.BoxLayout();
         contentBox.add_actor(titleBox);
 
-        this.titleLabel = new St.Label({ style_class: 'message-title',
-                                         x_expand: true,
-                                         x_align: Clutter.ActorAlign.START });
+        this.titleLabel = new St.Label({ style_class: 'message-title' });
         this.setTitle(title);
         titleBox.add_actor(this.titleLabel);
 
-        this._secondaryBin = new St.Bin({ style_class: 'message-secondary-bin' });
+        this._secondaryBin = new St.Bin({ style_class: 'message-secondary-bin',
+                                          x_expand: true, y_expand: true,
+                                          x_fill: true, y_fill: true });
         titleBox.add_actor(this._secondaryBin);
 
         let closeIcon = new St.Icon({ icon_name: 'window-close-symbolic',
                                       icon_size: 16 });
-        this._closeButton = new St.Button({ child: closeIcon, visible: false });
+        this._closeButton = new St.Button({ child: closeIcon, opacity: 0 });
         titleBox.add_actor(this._closeButton);
 
         this._bodyStack = new St.Widget({ x_expand: true });
@@ -493,9 +501,8 @@ const Message = new Lang.Class({
     },
 
     _sync: function() {
-        let hovered = this.actor.hover;
-        this._closeButton.visible = hovered && this.canClose();
-        this._secondaryBin.visible = !hovered;
+        let visible = this.actor.hover && this.canClose();
+        this._closeButton.opacity = visible ? 255 : 0;
     },
 
     _onClicked: function() {
@@ -517,35 +524,13 @@ const Message = new Lang.Class({
 });
 Signals.addSignalMethods(Message.prototype);
 
-const MessageListSection = new Lang.Class({
+var MessageListSection = new Lang.Class({
     Name: 'MessageListSection',
 
-    _init: function(title) {
+    _init: function() {
         this.actor = new St.BoxLayout({ style_class: 'message-list-section',
                                         clip_to_allocation: true,
                                         x_expand: true, vertical: true });
-        let titleBox = new St.BoxLayout({ style_class: 'message-list-section-title-box' });
-        this.actor.add_actor(titleBox);
-
-        this._title = new St.Button({ style_class: 'message-list-section-title',
-                                      label: title,
-                                      can_focus: true,
-                                      x_expand: true,
-                                      x_align: St.Align.START });
-        titleBox.add_actor(this._title);
-
-        this._title.connect('clicked', Lang.bind(this, this._onTitleClicked));
-        this._title.connect('key-focus-in', Lang.bind(this, this._onKeyFocusIn));
-
-        let closeIcon = new St.Icon({ icon_name: 'window-close-symbolic' });
-        this._closeButton = new St.Button({ style_class: 'message-list-section-close',
-                                            child: closeIcon,
-                                            accessible_name: _("Clear section"),
-                                            can_focus: true });
-        this._closeButton.set_x_align(Clutter.ActorAlign.END);
-        titleBox.add_actor(this._closeButton);
-
-        this._closeButton.connect('clicked', Lang.bind(this, this.clear));
 
         this._list = new St.BoxLayout({ style_class: 'message-list-section-list',
                                         vertical: true });
@@ -563,12 +548,8 @@ const MessageListSection = new Lang.Class({
         this._messages = new Map();
         this._date = new Date();
         this.empty = true;
+        this.canClear = false;
         this._sync();
-    },
-
-    _onTitleClicked: function() {
-        Main.overview.hide();
-        Main.panel.closeCalendar();
     },
 
     _onKeyFocusIn: function(actor) {
@@ -719,7 +700,13 @@ const MessageListSection = new Lang.Class({
         if (changed)
             this.emit('empty-changed');
 
-        this._closeButton.visible = this._canClear();
+        let canClear = this._canClear();
+        changed = this.canClear !== canClear;
+        this.canClear = canClear;
+
+        if (changed)
+            this.emit('can-clear-changed');
+
         this.actor.visible = this.allowed && this._shouldShow();
     }
 });

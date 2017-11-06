@@ -12,27 +12,51 @@ const Shell = imports.gi.Shell;
 const Signals = imports.signals;
 
 const AltTab = imports.ui.altTab;
+const Dialog = imports.ui.dialog;
 const WorkspaceSwitcherPopup = imports.ui.workspaceSwitcherPopup;
+const InhibitShortcutsDialog = imports.ui.inhibitShortcutsDialog;
 const Main = imports.ui.main;
 const ModalDialog = imports.ui.modalDialog;
 const Tweener = imports.ui.tweener;
 const WindowMenu = imports.ui.windowMenu;
+const PadOsd = imports.ui.padOsd;
+const EdgeDragAction = imports.ui.edgeDragAction;
+const CloseDialog = imports.ui.closeDialog;
+const SwitchMonitor = imports.ui.switchMonitor;
 
 const SHELL_KEYBINDINGS_SCHEMA = 'org.gnome.shell.keybindings';
-const MINIMIZE_WINDOW_ANIMATION_TIME = 0.2;
-const SHOW_WINDOW_ANIMATION_TIME = 0.15;
-const DIALOG_SHOW_WINDOW_ANIMATION_TIME = 0.1;
-const DESTROY_WINDOW_ANIMATION_TIME = 0.15;
-const DIALOG_DESTROY_WINDOW_ANIMATION_TIME = 0.1;
-const WINDOW_ANIMATION_TIME = 0.25;
-const DIM_BRIGHTNESS = -0.3;
-const DIM_TIME = 0.500;
-const UNDIM_TIME = 0.250;
+var MINIMIZE_WINDOW_ANIMATION_TIME = 0.2;
+var SHOW_WINDOW_ANIMATION_TIME = 0.15;
+var DIALOG_SHOW_WINDOW_ANIMATION_TIME = 0.1;
+var DESTROY_WINDOW_ANIMATION_TIME = 0.15;
+var DIALOG_DESTROY_WINDOW_ANIMATION_TIME = 0.1;
+var WINDOW_ANIMATION_TIME = 0.25;
+var DIM_BRIGHTNESS = -0.3;
+var DIM_TIME = 0.500;
+var UNDIM_TIME = 0.250;
 
-const DISPLAY_REVERT_TIMEOUT = 20; // in seconds - keep in sync with mutter
-const ONE_SECOND = 1000; // in ms
+var ONE_SECOND = 1000; // in ms
 
-const DisplayChangeDialog = new Lang.Class({
+const GSD_WACOM_BUS_NAME = 'org.gnome.SettingsDaemon.Wacom';
+const GSD_WACOM_OBJECT_PATH = '/org/gnome/SettingsDaemon/Wacom';
+
+const GsdWacomIface = '<node name="/org/gnome/SettingsDaemon/Wacom"> \
+<interface name="org.gnome.SettingsDaemon.Wacom"> \
+  <method name="SetGroupModeLED"> \
+    <arg name="device_path" direction="in" type="s"/> \
+    <arg name="group" direction="in" type="u"/> \
+    <arg name="mode" direction="in" type="u"/> \
+  </method> \
+  <method name="SetOLEDLabels"> \
+    <arg name="device_path" direction="in" type="s"/> \
+    <arg name="labels" direction="in" type="as"/> \
+  </method> \
+  </interface> \
+</node>';
+
+const GsdWacomProxy = Gio.DBusProxy.makeProxyWrapper(GsdWacomIface);
+
+var DisplayChangeDialog = new Lang.Class({
     Name: 'DisplayChangeDialog',
     Extends: ModalDialog.ModalDialog,
 
@@ -41,40 +65,18 @@ const DisplayChangeDialog = new Lang.Class({
 
         this._wm = wm;
 
-        let mainContentBox = new St.BoxLayout({ style_class: 'prompt-dialog-main-layout',
-                                                vertical: false });
-        this.contentLayout.add(mainContentBox,
+        this._countDown = Meta.MonitorManager.get_display_configuration_timeout();
+
+        let iconName = 'preferences-desktop-display-symbolic';
+        let icon = new Gio.ThemedIcon({ name: iconName });
+        let title = _("Do you want to keep these display settings?");
+        let body = this._formatCountDown();
+
+        this._content = new Dialog.MessageDialogContent({ icon, title, body });
+
+        this.contentLayout.add(this._content,
                                { x_fill: true,
                                  y_fill: true });
-
-        let icon = new St.Icon({ icon_name: 'preferences-desktop-display-symbolic' });
-        mainContentBox.add(icon,
-                           { x_fill:  true,
-                             y_fill:  false,
-                             x_align: St.Align.END,
-                             y_align: St.Align.START });
-
-        let messageBox = new St.BoxLayout({ style_class: 'prompt-dialog-message-layout',
-                                            vertical: true });
-        mainContentBox.add(messageBox,
-                           { expand: true, y_align: St.Align.START });
-
-        let subjectLabel = new St.Label({ style_class: 'prompt-dialog-headline',
-                                            text: _("Do you want to keep these display settings?") });
-        messageBox.add(subjectLabel,
-                       { y_fill:  false,
-                         y_align: St.Align.START });
-
-        this._countDown = DISPLAY_REVERT_TIMEOUT;
-        let message = this._formatCountDown();
-        this._descriptionLabel = new St.Label({ style_class: 'prompt-dialog-description',
-                                                text: this._formatCountDown() });
-        this._descriptionLabel.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
-        this._descriptionLabel.clutter_text.line_wrap = true;
-
-        messageBox.add(this._descriptionLabel,
-                       { y_fill:  true,
-                         y_align: St.Align.START });
 
         /* Translators: this and the following message should be limited in lenght,
            to avoid ellipsizing the labels.
@@ -115,7 +117,7 @@ const DisplayChangeDialog = new Lang.Class({
             return GLib.SOURCE_REMOVE;
         }
 
-        this._descriptionLabel.text = this._formatCountDown();
+        this._content.body = this._formatCountDown();
         return GLib.SOURCE_CONTINUE;
     },
 
@@ -130,7 +132,7 @@ const DisplayChangeDialog = new Lang.Class({
     },
 });
 
-const WindowDimmer = new Lang.Class({
+var WindowDimmer = new Lang.Class({
     Name: 'WindowDimmer',
 
     _init: function(actor) {
@@ -182,9 +184,9 @@ function getWindowDimmer(actor) {
  * the main window of an application, and give the app a grace period
  * where it can map another window before we remove the workspace.
  */
-const LAST_WINDOW_GRACE_TIME = 1000;
+var LAST_WINDOW_GRACE_TIME = 1000;
 
-const WorkspaceTracker = new Lang.Class({
+var WorkspaceTracker = new Lang.Class({
     Name: 'WorkspaceTracker',
 
     _init: function(wm) {
@@ -388,7 +390,7 @@ const WorkspaceTracker = new Lang.Class({
     }
 });
 
-const TilePreview = new Lang.Class({
+var TilePreview = new Lang.Class({
     Name: 'TilePreview',
 
     _init: function() {
@@ -475,7 +477,7 @@ const TilePreview = new Lang.Class({
     }
 });
 
-const TouchpadWorkspaceSwitchAction = new Lang.Class({
+var TouchpadWorkspaceSwitchAction = new Lang.Class({
     Name: 'TouchpadWorkspaceSwitchAction',
 
     _init: function(actor) {
@@ -510,11 +512,11 @@ const TouchpadWorkspaceSwitchAction = new Lang.Class({
         if (event.type() != Clutter.EventType.TOUCHPAD_SWIPE)
             return Clutter.EVENT_PROPAGATE;
 
-        if (event.get_gesture_swipe_finger_count() != 4)
+        if (event.get_touchpad_gesture_finger_count() != 4)
             return Clutter.EVENT_PROPAGATE;
 
         if (event.get_gesture_phase() == Clutter.TouchpadGesturePhase.UPDATE) {
-            let [dx, dy] = event.get_gesture_motion_delta(event);
+            let [dx, dy] = event.get_gesture_motion_delta();
 
             this._dx += dx;
             this._dy += dy;
@@ -531,9 +533,10 @@ const TouchpadWorkspaceSwitchAction = new Lang.Class({
 });
 Signals.addSignalMethods(TouchpadWorkspaceSwitchAction.prototype);
 
-const WorkspaceSwitchAction = new Lang.Class({
+var WorkspaceSwitchAction = new Lang.Class({
     Name: 'WorkspaceSwitchAction',
     Extends: Clutter.SwipeAction,
+    Signals: { 'activated': { param_types: [Meta.MotionDirection.$gtype] } },
 
     _init : function() {
         const MOTION_THRESHOLD = 50;
@@ -571,11 +574,11 @@ const WorkspaceSwitchAction = new Lang.Class({
         this.emit('activated', dir);
     }
 });
-Signals.addSignalMethods(WorkspaceSwitchAction.prototype);
 
-const AppSwitchAction = new Lang.Class({
+var AppSwitchAction = new Lang.Class({
     Name: 'AppSwitchAction',
     Extends: Clutter.GestureAction,
+    Signals: { 'activated': {} },
 
     _init : function() {
         this.parent();
@@ -637,9 +640,8 @@ const AppSwitchAction = new Lang.Class({
         return true;
     }
 });
-Signals.addSignalMethods(AppSwitchAction.prototype);
 
-const ResizePopup = new Lang.Class({
+var ResizePopup = new Lang.Class({
     Name: 'ResizePopup',
 
     _init: function() {
@@ -655,7 +657,7 @@ const ResizePopup = new Lang.Class({
     set: function(rect, displayW, displayH) {
         /* Translators: This represents the size of a window. The first number is
          * the width of the window and the second is the height. */
-        let text = _("%d x %d").format(displayW, displayH);
+        let text = _("%d × %d").format(displayW, displayH);
         this._label.set_text(text);
 
         this._widget.set_position(rect.x, rect.y);
@@ -668,7 +670,7 @@ const ResizePopup = new Lang.Class({
     },
 });
 
-const WindowManager = new Lang.Class({
+var WindowManager = new Lang.Class({
     Name: 'WindowManager',
 
     _init : function() {
@@ -705,10 +707,13 @@ const WindowManager = new Lang.Class({
         this._shellwm.connect('minimize', Lang.bind(this, this._minimizeWindow));
         this._shellwm.connect('unminimize', Lang.bind(this, this._unminimizeWindow));
         this._shellwm.connect('size-change', Lang.bind(this, this._sizeChangeWindow));
+        this._shellwm.connect('size-changed', Lang.bind(this, this._sizeChangedWindow));
         this._shellwm.connect('map', Lang.bind(this, this._mapWindow));
         this._shellwm.connect('destroy', Lang.bind(this, this._destroyWindow));
         this._shellwm.connect('filter-keybinding', Lang.bind(this, this._filterKeybinding));
         this._shellwm.connect('confirm-display-change', Lang.bind(this, this._confirmDisplayChange));
+        this._shellwm.connect('create-close-dialog', Lang.bind(this, this._createCloseDialog));
+        this._shellwm.connect('create-inhibit-shortcuts-dialog', Lang.bind(this, this._createInhibitShortcutsDialog));
         global.screen.connect('restacked', Lang.bind(this, this._syncStacking));
 
         this._workspaceSwitcherPopup = null;
@@ -894,6 +899,10 @@ const WindowManager = new Lang.Class({
                                         Shell.ActionMode.UNLOCK_SCREEN |
                                         Shell.ActionMode.LOGIN_SCREEN,
                                         Lang.bind(this, this._startA11ySwitcher));
+        this.setCustomKeybindingHandler('switch-monitor',
+                                        Shell.ActionMode.NORMAL |
+                                        Shell.ActionMode.OVERVIEW,
+                                        Lang.bind(this, this._startSwitcher));
 
         this.addKeybinding('pause-resume-tweens',
                            new Gio.Settings({ schema_id: SHELL_KEYBINDINGS_SCHEMA }),
@@ -917,6 +926,35 @@ const WindowManager = new Lang.Class({
                            Lang.bind(this, this._toggleCalendar));
 
         global.display.connect('show-resize-popup', Lang.bind(this, this._showResizePopup));
+        global.display.connect('show-pad-osd', Lang.bind(this, this._showPadOsd));
+        global.display.connect('show-osd', Lang.bind(this, function (display, monitorIndex, iconName, label) {
+            let icon = Gio.Icon.new_for_string(iconName);
+            Main.osdWindowManager.show(monitorIndex, icon, label, null);
+        }));
+
+        this._gsdWacomProxy = new GsdWacomProxy(Gio.DBus.session, GSD_WACOM_BUS_NAME,
+                                                GSD_WACOM_OBJECT_PATH,
+                                                Lang.bind(this, function(proxy, error) {
+                                                    if (error) {
+                                                        log(error.message);
+                                                        return;
+                                                    }
+                                                }));
+
+        global.display.connect('pad-mode-switch', Lang.bind(this, function (display, pad, group, mode) {
+            let labels = [];
+
+            //FIXME: Fix num buttons
+            for (let i = 0; i < 50; i++) {
+                let str = display.get_pad_action_label(pad, Meta.PadActionType.BUTTON, i);
+                labels.push(str ? str: '');
+            }
+
+            if (this._gsdWacomProxy) {
+                this._gsdWacomProxy.SetOLEDLabelsRemote(pad.get_device_node(), labels);
+                this._gsdWacomProxy.SetGroupModeLEDRemote(pad.get_device_node(), group, mode);
+            }
+        }));
 
         Main.overview.connect('showing', Lang.bind(this, function() {
             for (let i = 0; i < this._dimmedWindows.length; i++)
@@ -947,6 +985,19 @@ const WindowManager = new Lang.Class({
         gesture.connect('activated', Lang.bind(this, this._switchApp));
         global.stage.add_action(gesture);
 
+        let mode = Shell.ActionMode.ALL & ~Shell.ActionMode.LOCK_SCREEN;
+        gesture = new EdgeDragAction.EdgeDragAction(St.Side.BOTTOM, mode);
+        gesture.connect('activated', Lang.bind(this, function() {
+            Main.keyboard.show(Main.layoutManager.bottomIndex);
+        }));
+        global.stage.add_action(gesture);
+    },
+
+    _showPadOsd: function (display, device, settings, imagePath, editionMode, monitorIndex) {
+        this._currentPadOsd = new PadOsd.PadOsd(device, settings, imagePath, editionMode, monitorIndex);
+        this._currentPadOsd.connect('closed', Lang.bind(this, function() { this._currentPadOsd = null }));
+
+        return this._currentPadOsd.actor;
     },
 
     _actionSwitchWorkspace: function(action, direction) {
@@ -1071,6 +1122,9 @@ const WindowManager = new Lang.Class({
             return false;
 
         if (!this._shouldAnimate())
+            return false;
+
+        if (!actor.get_texture())
             return false;
 
         let type = actor.meta_window.get_window_type();
@@ -1247,37 +1301,15 @@ const WindowManager = new Lang.Class({
             return;
         }
 
-        if (whichChange == Meta.SizeChange.FULLSCREEN)
-            this._fullscreenWindow(shellwm, actor, oldFrameRect, oldBufferRect);
-        else if (whichChange == Meta.SizeChange.UNFULLSCREEN)
-            this._unfullscreenWindow(shellwm, actor, oldFrameRect, oldBufferRect);
+        if (oldFrameRect.width > 0 && oldFrameRect.height > 0)
+            this._prepareAnimationInfo(shellwm, actor, oldFrameRect, whichChange);
         else
             shellwm.completed_size_change(actor);
     },
 
-    _fullscreenWindow: function(shellwm, actor, oldFrameRect, oldBufferRect) {
-        let monitor = Main.layoutManager.monitors[actor.meta_window.get_monitor()];
-        actor.translation_x = oldFrameRect.x - monitor.x;
-        actor.translation_y = oldFrameRect.y - monitor.y;
-        this._fullscreenAnimation(shellwm, actor, oldFrameRect);
-    },
-
-    _unfullscreenWindow: function(shellwm, actor, oldFrameRect, oldBufferRect) {
-        let targetRect = actor.meta_window.get_frame_rect();
-        let monitor = Main.layoutManager.monitors[actor.meta_window.get_monitor()];
-        actor.translation_x = -(targetRect.x - monitor.x);
-        actor.translation_y = -(targetRect.y - monitor.y);
-        this._fullscreenAnimation(shellwm, actor, oldFrameRect);
-    },
-
-    _fullscreenAnimation: function(shellwm, actor, oldFrameRect) {
-        this._resizing.push(actor);
-
+    _prepareAnimationInfo: function(shellwm, actor, oldFrameRect, change) {
         // Position a clone of the window on top of the old position,
         // while actor updates are frozen.
-        // Note that the MetaWindow has up to date sizing information for
-        // the new geometry already.
-        let targetRect = actor.meta_window.get_frame_rect();
         let actorContent = Shell.util_get_content_for_window_actor(actor, oldFrameRect);
         let actorClone = new St.Widget({ content: actorContent });
         actorClone.set_offscreen_redirect(Clutter.OffscreenRedirect.ALWAYS);
@@ -1285,10 +1317,27 @@ const WindowManager = new Lang.Class({
         actorClone.set_size(oldFrameRect.width, oldFrameRect.height);
         Main.uiGroup.add_actor(actorClone);
 
-        actor.__fullscreenClone = actorClone;
+        if (this._clearAnimationInfo(actor))
+            this._shellwm.completed_size_change(actor);
 
-        let scaleX = targetRect.width / oldFrameRect.width;
-        let scaleY = targetRect.height / oldFrameRect.height;
+        actor.__animationInfo = { clone: actorClone,
+                                  oldRect: oldFrameRect };
+    },
+
+    _sizeChangedWindow: function(shellwm, actor) {
+        if (!actor.__animationInfo)
+            return;
+        if (this._resizing.indexOf(actor) != -1)
+            return;
+
+        let actorClone = actor.__animationInfo.clone;
+        let targetRect = actor.meta_window.get_frame_rect();
+        let sourceRect = actor.__animationInfo.oldRect;
+
+        let scaleX = targetRect.width / sourceRect.width;
+        let scaleY = targetRect.height / sourceRect.height;
+
+        this._resizing.push(actor);
 
         // Now scale and fade out the clone
         Tweener.addTween(actorClone,
@@ -1301,9 +1350,10 @@ const WindowManager = new Lang.Class({
                            transition: 'easeOutQuad'
                          });
 
+        actor.translation_x = -targetRect.x + sourceRect.x;
+        actor.translation_y = -targetRect.y + sourceRect.y;
+
         // Now set scale the actor to size it as the clone.
-        // Note that the caller of this function already set a translation
-        // on the actor.
         actor.scale_x = 1 / scaleX;
         actor.scale_y = 1 / scaleY;
 
@@ -1329,6 +1379,15 @@ const WindowManager = new Lang.Class({
         shellwm.completed_size_change(actor);
     },
 
+    _clearAnimationInfo: function(actor) {
+        if (actor.__animationInfo) {
+            actor.__animationInfo.clone.destroy();
+            delete actor.__animationInfo;
+            return true;
+        }
+        return false;
+    },
+
     _sizeChangeWindowDone: function(shellwm, actor) {
         if (this._removeEffect(this._resizing, actor)) {
             Tweener.removeTweens(actor);
@@ -1336,23 +1395,13 @@ const WindowManager = new Lang.Class({
             actor.scale_y = 1.0;
             actor.translation_x = 0;
             actor.translation_y = 0;
-
-            let actorClone = actor.__fullscreenClone;
-            if (actorClone) {
-                actorClone.destroy();
-                delete actor.__fullscreenClone;
-            }
+            this._clearAnimationInfo(actor);
         }
     },
 
     _sizeChangeWindowOverwritten: function(shellwm, actor) {
-        if (this._removeEffect(this._resizing, actor)) {
-            let actorClone = actor.__fullscreenClone;
-            if (actorClone) {
-                actorClone.destroy();
-                delete actor.__fullscreenClone;
-            }
-        }
+        if (this._removeEffect(this._resizing, actor))
+            this._clearAnimationInfo(actor);
     },
 
     _hasAttachedDialogs: function(window, ignoreWindow) {
@@ -1543,7 +1592,7 @@ const WindowManager = new Lang.Class({
             return;
         }
 
-        switch (actor._windowType) {
+        switch (actor.meta_window.window_type) {
         case Meta.WindowType.NORMAL:
             actor.set_pivot_point(0.5, 0.5);
             this._destroying.push(actor);
@@ -1795,6 +1844,9 @@ const WindowManager = new Lang.Class({
             case 'cycle-group-backward':
                 constructor = AltTab.GroupCyclerPopup;
                 break;
+            case 'switch-monitor':
+                constructor = SwitchMonitor.SwitchMonitorPopup;
+                break;
         }
 
         if (!constructor)
@@ -1929,6 +1981,14 @@ const WindowManager = new Lang.Class({
     _confirmDisplayChange: function() {
         let dialog = new DisplayChangeDialog(this._shellwm);
         dialog.open();
+    },
+
+    _createCloseDialog: function (shellwm, window) {
+        return new CloseDialog.CloseDialog(window);
+    },
+
+    _createInhibitShortcutsDialog: function (shellwm, window) {
+        return new InhibitShortcutsDialog.InhibitShortcutsDialog(window);
     },
 
     _showResizePopup: function(display, show, rect, displayW, displayH) {

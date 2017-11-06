@@ -28,6 +28,9 @@ const GnomeShellIface = '<node> \
 <method name="ShowMonitorLabels"> \
     <arg type="a{uv}" direction="in" name="params" /> \
 </method> \
+<method name="ShowMonitorLabels2"> \
+    <arg type="a{sv}" direction="in" name="params" /> \
+</method> \
 <method name="HideMonitorLabels" /> \
 <method name="FocusApp"> \
     <arg type="s" direction="in" name="id"/> \
@@ -76,7 +79,7 @@ const ScreenSaverIface = '<node> \
 </interface> \
 </node>';
 
-const GnomeShell = new Lang.Class({
+var GnomeShell = new Lang.Class({
     Name: 'GnomeShellDBus',
 
     _init: function() {
@@ -142,15 +145,15 @@ const GnomeShell = new Lang.Class({
         for (let param in params)
             params[param] = params[param].deep_unpack();
 
-        let monitorIndex = -1;
-        if (params['monitor'] >= 0)
-            monitorIndex = params['monitor'];
+        let monitorIndex = params['monitor'] || -1;
+        let label = params['label'] || undefined;
+        let level = params['level'] || undefined;
 
         let icon = null;
         if (params['icon'])
             icon = Gio.Icon.new_for_string(params['icon']);
 
-        Main.osdWindowManager.show(monitorIndex, icon, params['label'], params['level']);
+        Main.osdWindowManager.show(monitorIndex, icon, label, level);
     },
 
     FocusApp: function(id) {
@@ -250,6 +253,12 @@ const GnomeShell = new Lang.Class({
         Main.osdMonitorLabeler.show(sender, dict);
     },
 
+    ShowMonitorLabels2Async: function(params, invocation) {
+        let sender = invocation.get_sender();
+        let [dict] = params;
+        Main.osdMonitorLabeler.show2(sender, dict);
+    },
+
     HideMonitorLabelsAsync: function(params, invocation) {
         let sender = invocation.get_sender();
         Main.osdMonitorLabeler.hide(sender);
@@ -317,7 +326,7 @@ const GnomeShellExtensionsIface = '<node> \
 </interface> \
 </node>';
 
-const GnomeShellExtensions = new Lang.Class({
+var GnomeShellExtensions = new Lang.Class({
     Name: 'GnomeShellExtensionsDBus',
 
     _init: function() {
@@ -423,7 +432,7 @@ const GnomeShellExtensions = new Lang.Class({
     }
 });
 
-const ScreenSaverDBus = new Lang.Class({
+var ScreenSaverDBus = new Lang.Class({
     Name: 'ScreenSaverDBus',
 
     _init: function(screenShield) {

@@ -24,41 +24,56 @@ const OverviewControls = imports.ui.overviewControls;
 const PopupMenu = imports.ui.popupMenu;
 const Tweener = imports.ui.tweener;
 const Workspace = imports.ui.workspace;
+const Search = imports.ui.search;
+const System = imports.ui.status.system;
 const Params = imports.misc.params;
 const Util = imports.misc.util;
+const SystemActions = imports.misc.systemActions;
 
-const MAX_APPLICATION_WORK_MILLIS = 75;
-const MENU_POPUP_TIMEOUT = 600;
-const MAX_COLUMNS = 6;
-const MIN_COLUMNS = 4;
-const MIN_ROWS = 4;
+var MAX_APPLICATION_WORK_MILLIS = 75;
+var MENU_POPUP_TIMEOUT = 600;
+var MAX_COLUMNS = 6;
+var MIN_COLUMNS = 4;
+var MIN_ROWS = 4;
 
-const INACTIVE_GRID_OPACITY = 77;
+var INACTIVE_GRID_OPACITY = 77;
 // This time needs to be less than IconGrid.EXTRA_SPACE_ANIMATION_TIME
 // to not clash with other animations
-const INACTIVE_GRID_OPACITY_ANIMATION_TIME = 0.24;
-const FOLDER_SUBICON_FRACTION = .4;
+var INACTIVE_GRID_OPACITY_ANIMATION_TIME = 0.24;
+var FOLDER_SUBICON_FRACTION = .4;
 
-const MIN_FREQUENT_APPS_COUNT = 3;
+var MIN_FREQUENT_APPS_COUNT = 3;
 
-const INDICATORS_BASE_TIME = 0.25;
-const INDICATORS_ANIMATION_DELAY = 0.125;
-const INDICATORS_ANIMATION_MAX_TIME = 0.75;
+var INDICATORS_BASE_TIME = 0.25;
+var INDICATORS_ANIMATION_DELAY = 0.125;
+var INDICATORS_ANIMATION_MAX_TIME = 0.75;
+
+var VIEWS_SWITCH_TIME = 0.4;
+var VIEWS_SWITCH_ANIMATION_DELAY = 0.1;
 
 // Follow iconGrid animations approach and divide by 2 to animate out to
 // not annoy the user when the user wants to quit appDisplay.
 // Also, make sure we don't exceed iconGrid animation total time or
 // views switch time.
-const INDICATORS_BASE_TIME_OUT = 0.125;
-const INDICATORS_ANIMATION_DELAY_OUT = 0.0625;
-const INDICATORS_ANIMATION_MAX_TIME_OUT =
+var INDICATORS_BASE_TIME_OUT = 0.125;
+var INDICATORS_ANIMATION_DELAY_OUT = 0.0625;
+var INDICATORS_ANIMATION_MAX_TIME_OUT =
     Math.min (VIEWS_SWITCH_TIME,
               IconGrid.ANIMATION_TIME_OUT + IconGrid.ANIMATION_MAX_DELAY_OUT_FOR_ITEM);
 
-const PAGE_SWITCH_TIME = 0.3;
+var PAGE_SWITCH_TIME = 0.3;
 
-const VIEWS_SWITCH_TIME = 0.4;
-const VIEWS_SWITCH_ANIMATION_DELAY = 0.1;
+const SWITCHEROO_BUS_NAME = 'net.hadess.SwitcherooControl';
+const SWITCHEROO_OBJECT_PATH = '/net/hadess/SwitcherooControl';
+
+const SwitcherooProxyInterface = '<node> \
+<interface name="net.hadess.SwitcherooControl"> \
+  <property name="HasDualGpu" type="b" access="read"/> \
+</interface> \
+</node>';
+
+const SwitcherooProxy = Gio.DBusProxy.makeProxyWrapper(SwitcherooProxyInterface);
+let discreteGpuAvailable = false;
 
 function _getCategories(info) {
     let categoriesStr = info.get_categories();
@@ -96,7 +111,7 @@ function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
 }
 
-const BaseAppView = new Lang.Class({
+var BaseAppView = new Lang.Class({
     Name: 'BaseAppView',
     Abstract: true,
 
@@ -198,28 +213,21 @@ const BaseAppView = new Lang.Class({
     },
 
     animate: function(animationDirection, onComplete) {
-        if (animationDirection == IconGrid.AnimationDirection.IN) {
-            let toAnimate = this._grid.actor.connect('notify::allocation', Lang.bind(this,
-                function() {
-                    this._grid.actor.disconnect(toAnimate);
-                    // We need to hide the grid temporary to not flash it
-                    // for a frame
-                    this._grid.actor.opacity = 0;
-                    Meta.later_add(Meta.LaterType.BEFORE_REDRAW,
-                                   Lang.bind(this, function() {
-                                       this._doSpringAnimation(animationDirection)
-                                  }));
-                }));
-        } else {
-            this._doSpringAnimation(animationDirection);
-        }
-
         if (onComplete) {
             let animationDoneId = this._grid.connect('animation-done', Lang.bind(this,
                 function () {
                     this._grid.disconnect(animationDoneId);
                     onComplete();
             }));
+        }
+
+        if (animationDirection == IconGrid.AnimationDirection.IN) {
+            let id = this._grid.actor.connect('paint', () => {
+                this._grid.actor.disconnect(id);
+                this._doSpringAnimation(animationDirection);
+            });
+        } else {
+            this._doSpringAnimation(animationDirection);
         }
     },
 
@@ -244,7 +252,7 @@ const BaseAppView = new Lang.Class({
 });
 Signals.addSignalMethods(BaseAppView.prototype);
 
-const PageIndicatorsActor = new Lang.Class({
+var PageIndicatorsActor = new Lang.Class({
     Name:'PageIndicatorsActor',
     Extends: St.BoxLayout,
 
@@ -268,7 +276,7 @@ const PageIndicatorsActor = new Lang.Class({
     }
 });
 
-const PageIndicators = new Lang.Class({
+var PageIndicators = new Lang.Class({
     Name:'PageIndicators',
 
     _init: function() {
@@ -361,7 +369,7 @@ const PageIndicators = new Lang.Class({
 });
 Signals.addSignalMethods(PageIndicators.prototype);
 
-const AllView = new Lang.Class({
+var AllView = new Lang.Class({
     Name: 'AllView',
     Extends: BaseAppView,
 
@@ -435,7 +443,10 @@ const AllView = new Lang.Class({
             }));
         this._grid.connect('space-opened', Lang.bind(this,
             function() {
-                this._scrollView.get_effect('fade').enabled = false;
+                let fadeEffect = this._scrollView.get_effect('fade');
+                if (fadeEffect)
+                    fadeEffect.enabled = false;
+
                 this.emit('space-ready');
             }));
         this._grid.connect('space-closed', Lang.bind(this,
@@ -646,7 +657,11 @@ const AllView = new Lang.Class({
 
     _closeSpaceForPopup: function() {
         this._updateIconOpacities(false);
-        this._scrollView.get_effect('fade').enabled = true;
+
+        let fadeEffect = this._scrollView.get_effect('fade');
+        if (fadeEffect)
+            fadeEffect.enabled = true;
+
         this._grid.closeExtraSpace();
     },
 
@@ -780,7 +795,7 @@ const AllView = new Lang.Class({
 });
 Signals.addSignalMethods(AllView.prototype);
 
-const FrequentView = new Lang.Class({
+var FrequentView = new Lang.Class({
     Name: 'FrequentView',
     Extends: BaseAppView,
 
@@ -854,12 +869,12 @@ const FrequentView = new Lang.Class({
     }
 });
 
-const Views = {
+var Views = {
     FREQUENT: 0,
     ALL: 1
 };
 
-const ControlsBoxLayout = Lang.Class({
+var ControlsBoxLayout = Lang.Class({
     Name: 'ControlsBoxLayout',
     Extends: Clutter.BoxLayout,
 
@@ -884,9 +899,11 @@ const ControlsBoxLayout = Lang.Class({
     }
 });
 
-const ViewStackLayout = new Lang.Class({
+var ViewStackLayout = new Lang.Class({
     Name: 'ViewStackLayout',
     Extends: Clutter.BinLayout,
+    Signals: { 'allocated-size-changed': { param_types: [GObject.TYPE_INT,
+                                                         GObject.TYPE_INT] } },
 
     vfunc_allocate: function (actor, box, flags) {
         let availWidth = box.x2 - box.x1;
@@ -897,9 +914,8 @@ const ViewStackLayout = new Lang.Class({
         this.parent(actor, box, flags);
     }
 });
-Signals.addSignalMethods(ViewStackLayout.prototype);
 
-const AppDisplay = new Lang.Class({
+var AppDisplay = new Lang.Class({
     Name: 'AppDisplay',
 
     _init: function() {
@@ -969,10 +985,36 @@ const AppDisplay = new Lang.Class({
             initialView = Views.ALL;
         this._showView(initialView);
         this._updateFrequentVisibility();
+
+        Gio.DBus.system.watch_name(SWITCHEROO_BUS_NAME,
+                                   Gio.BusNameWatcherFlags.NONE,
+                                   Lang.bind(this, this._switcherooProxyAppeared),
+                                   Lang.bind(this, function() {
+                                       this._switcherooProxy = null;
+                                       this._updateDiscreteGpuAvailable();
+                                   }));
+    },
+
+    _updateDiscreteGpuAvailable: function() {
+        if (!this._switcherooProxy)
+            discreteGpuAvailable = false;
+        else
+            discreteGpuAvailable = this._switcherooProxy.HasDualGpu;
+    },
+
+    _switcherooProxyAppeared: function() {
+        this._switcherooProxy = new SwitcherooProxy(Gio.DBus.system, SWITCHEROO_BUS_NAME, SWITCHEROO_OBJECT_PATH,
+            Lang.bind(this, function(proxy, error) {
+                if (error) {
+                    log(error.message);
+                    return;
+                }
+                this._updateDiscreteGpuAvailable();
+            }));
     },
 
     animate: function(animationDirection, onComplete) {
-        let currentView = this._views[global.settings.get_uint('app-picker-view')].view;
+        let currentView = this._views.filter(v => v.control.has_style_pseudo_class('checked')).pop().view;
 
         // Animate controls opacity using iconGrid animation time, since
         // it will be the time the AllView or FrequentView takes to show
@@ -1038,25 +1080,43 @@ const AppDisplay = new Lang.Class({
     }
 })
 
-const AppSearchProvider = new Lang.Class({
+var AppSearchProvider = new Lang.Class({
     Name: 'AppSearchProvider',
 
     _init: function() {
         this._appSys = Shell.AppSystem.get_default();
         this.id = 'applications';
+        this.isRemoteProvider = false;
+        this.canLaunchSearch = false;
+
+        this._systemActions = new SystemActions.getDefault();
     },
 
     getResultMetas: function(apps, callback) {
         let metas = [];
-        for (let i = 0; i < apps.length; i++) {
-            let app = this._appSys.lookup_app(apps[i]);
-            metas.push({ 'id': app.get_id(),
-                         'name': app.get_name(),
-                         'createIcon': function(size) {
-                             return app.create_icon_texture(size);
-                         }
-                       });
+        for (let id of apps) {
+            if (id.endsWith('.desktop')) {
+                let app = this._appSys.lookup_app(id);
+
+                metas.push({ 'id': app.get_id(),
+                             'name': app.get_name(),
+                             'createIcon': function(size) {
+                                 return app.create_icon_texture(size);
+                           }
+                });
+            } else {
+                let name = this._systemActions.getName(id);
+                let iconName = this._systemActions.getIconName(id);
+
+                let createIcon = size => new St.Icon({ icon_name: iconName,
+                                                       width: size,
+                                                       height: size,
+                                                       style_class: 'system-action-icon' });
+
+                metas.push({ id, name, createIcon });
+            }
         }
+
         callback(metas);
     },
 
@@ -1078,6 +1138,9 @@ const AppSearchProvider = new Lang.Class({
                 return usage.compare('', a, b);
             }));
         });
+
+        results = results.concat(this._systemActions.getMatchingActions(terms));
+
         callback(results);
     },
 
@@ -1086,12 +1149,14 @@ const AppSearchProvider = new Lang.Class({
     },
 
     createResultObject: function (resultMeta) {
-        let app = this._appSys.lookup_app(resultMeta['id']);
-        return new AppIcon(app);
+        if (resultMeta.id.endsWith('.desktop'))
+            return new AppIcon(this._appSys.lookup_app(resultMeta['id']));
+        else
+            return new SystemActionIcon(this, resultMeta);
     }
 });
 
-const FolderView = new Lang.Class({
+var FolderView = new Lang.Class({
     Name: 'FolderView',
     Extends: BaseAppView,
 
@@ -1131,13 +1196,9 @@ const FolderView = new Lang.Class({
         let numItems = this._allItems.length;
         let rtl = icon.get_text_direction() == Clutter.TextDirection.RTL;
         for (let i = 0; i < 4; i++) {
-            let bin;
-            if (i < numItems) {
-                let texture = this._allItems[i].app.create_icon_texture(subSize);
-                bin = new St.Bin({ child: texture });
-            } else {
-                bin = new St.Bin({ width: subSize, height: subSize });
-            }
+            let bin = new St.Bin({ width: subSize, height: subSize });
+            if (i < numItems)
+                bin.child = this._allItems[i].app.create_icon_texture(subSize);
             layout.attach(bin, rtl ? (i + 1) % 2 : i % 2, Math.floor(i / 2), 1, 1);
         }
 
@@ -1207,11 +1268,12 @@ const FolderView = new Lang.Class({
     }
 });
 
-const FolderIcon = new Lang.Class({
+var FolderIcon = new Lang.Class({
     Name: 'FolderIcon',
 
     _init: function(id, path, parentView) {
         this.id = id;
+        this.name = '';
         this._parentView = parentView;
 
         this._folder = new Gio.Settings({ schema_id: 'org.gnome.desktop.app-folders.folder',
@@ -1384,7 +1446,7 @@ const FolderIcon = new Lang.Class({
 });
 Signals.addSignalMethods(FolderIcon.prototype);
 
-const AppFolderPopup = new Lang.Class({
+var AppFolderPopup = new Lang.Class({
     Name: 'AppFolderPopup',
 
     _init: function(source, side) {
@@ -1545,7 +1607,7 @@ const AppFolderPopup = new Lang.Class({
 });
 Signals.addSignalMethods(AppFolderPopup.prototype);
 
-const AppIcon = new Lang.Class({
+var AppIcon = new Lang.Class({
     Name: 'AppIcon',
 
     _init : function(app, iconParams) {
@@ -1791,7 +1853,7 @@ const AppIcon = new Lang.Class({
 });
 Signals.addSignalMethods(AppIcon.prototype);
 
-const AppIconMenu = new Lang.Class({
+var AppIconMenu = new Lang.Class({
     Name: 'AppIconMenu',
     Extends: PopupMenu.PopupMenu,
 
@@ -1859,6 +1921,19 @@ const AppIconMenu = new Lang.Class({
                     this.emit('activate-window', null);
                 }));
                 this._appendSeparator();
+            }
+
+            if (discreteGpuAvailable &&
+                this._source.app.state == Shell.AppState.STOPPED &&
+                actions.indexOf('activate-discrete-gpu') == -1) {
+                this._onDiscreteGpuMenuItem = this._appendMenuItem(_("Launch using Dedicated Graphics Card"));
+                this._onDiscreteGpuMenuItem.connect('activate', Lang.bind(this, function() {
+                    if (this._source.app.state == Shell.AppState.STOPPED)
+                        this._source.animateLaunch();
+
+                    this._source.app.launch(0, -1, true);
+                    this.emit('activate-window', null);
+                }));
             }
 
             for (let i = 0; i < actions.length; i++) {
@@ -1932,3 +2007,13 @@ const AppIconMenu = new Lang.Class({
     }
 });
 Signals.addSignalMethods(AppIconMenu.prototype);
+
+var SystemActionIcon = new Lang.Class({
+    Name: 'SystemActionIcon',
+    Extends: Search.GridSearchResult,
+
+    activate: function() {
+        SystemActions.getDefault().activateAction(this.metaInfo['id']);
+        Main.overview.hide();
+    }
+});

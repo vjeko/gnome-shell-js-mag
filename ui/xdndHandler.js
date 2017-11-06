@@ -8,7 +8,7 @@ const Shell = imports.gi.Shell;
 const Signals = imports.signals;
 const DND = imports.ui.dnd;
 
-const XdndHandler = new Lang.Class({
+var XdndHandler = new Lang.Class({
     Name: 'XdndHandler',
 
     _init: function() {
@@ -24,9 +24,10 @@ const XdndHandler = new Lang.Class({
         if (!Meta.is_wayland_compositor())
             global.init_xdnd();
 
-        global.connect('xdnd-enter', Lang.bind(this, this._onEnter));
-        global.connect('xdnd-position-changed', Lang.bind(this, this._onPositionChanged));
-        global.connect('xdnd-leave', Lang.bind(this, this._onLeave));
+        var dnd = Meta.get_backend().get_dnd();
+        dnd.connect('dnd-enter', Lang.bind(this, this._onEnter));
+        dnd.connect('dnd-position-change', Lang.bind(this, this._onPositionChanged));
+        dnd.connect('dnd-leave', Lang.bind(this, this._onLeave));
 
         this._windowGroupVisibilityHandlerId = 0;
     },

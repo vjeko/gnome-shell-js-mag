@@ -6,11 +6,17 @@ const GLib = imports.gi.GLib;
 const Gtk = imports.gi.Gtk;
 const Lang = imports.lang;
 const Mainloop = imports.mainloop;
-const Shell = imports.gi.Shell;
 const Signals = imports.signals;
 const St = imports.gi.St;
-const Tpl = imports.gi.TelepathyLogger;
-const Tp = imports.gi.TelepathyGLib;
+
+var Tpl = null;
+var Tp = null;
+try {
+    Tpl = imports.gi.TelepathyLogger;
+    Tp = imports.gi.TelepathyGLib;
+} catch(e) {
+    log('Telepathy is not available, chat integration will be disabled.');
+}
 
 const History = imports.misc.history;
 const Main = imports.ui.main;
@@ -20,26 +26,28 @@ const Params = imports.misc.params;
 const PopupMenu = imports.ui.popupMenu;
 const Util = imports.misc.util;
 
+const HAVE_TP = (Tp != null && Tpl != null);
+
 // See Notification.appendMessage
-const SCROLLBACK_IMMEDIATE_TIME = 3 * 60; // 3 minutes
-const SCROLLBACK_RECENT_TIME = 15 * 60; // 15 minutes
-const SCROLLBACK_RECENT_LENGTH = 20;
-const SCROLLBACK_IDLE_LENGTH = 5;
+var SCROLLBACK_IMMEDIATE_TIME = 3 * 60; // 3 minutes
+var SCROLLBACK_RECENT_TIME = 15 * 60; // 15 minutes
+var SCROLLBACK_RECENT_LENGTH = 20;
+var SCROLLBACK_IDLE_LENGTH = 5;
 
 // See Source._displayPendingMessages
-const SCROLLBACK_HISTORY_LINES = 10;
+var SCROLLBACK_HISTORY_LINES = 10;
 
 // See Notification._onEntryChanged
-const COMPOSING_STOP_TIMEOUT = 5;
+var COMPOSING_STOP_TIMEOUT = 5;
 
-const CHAT_EXPAND_LINES = 12;
+var CHAT_EXPAND_LINES = 12;
 
-const NotificationDirection = {
+var NotificationDirection = {
     SENT: 'chat-sent',
     RECEIVED: 'chat-received'
 };
 
-const N_ = function(s) { return s; };
+var N_ = function(s) { return s; };
 
 function makeMessageFromTpMessage(tpMessage, direction) {
     let [text, flags] = tpMessage.to_text();
@@ -71,8 +79,43 @@ function makeMessageFromTplEvent(event) {
     };
 }
 
-const TelepathyClient = new Lang.Class({
+var TelepathyComponent = new Lang.Class({
+    Name: 'TelepathyComponent',
+
+    _init: function() {
+        this._client = null;
+
+        if (!HAVE_TP)
+            return; // Telepathy isn't available
+
+        this._client = new TelepathyClient();
+    },
+
+    enable: function() {
+        if (!this._client)
+            return;
+
+        try {
+            this._client.register();
+        } catch (e) {
+            throw new Error('Couldn\'t register Telepathy client. Error: \n' + e);
+        }
+
+        if (!this._client.account_manager.is_prepared(Tp.AccountManager.get_feature_quark_core()))
+            this._client.account_manager.prepare_async(null, null);
+    },
+
+    disable: function() {
+        if (!this._client)
+            return;
+
+        this._client.unregister();
+    }
+});
+
+var TelepathyClient = HAVE_TP ? new Lang.Class({
     Name: 'TelepathyClient',
+    Extends: Tp.BaseClient,
 
     _init: function() {
         // channel path -> ChatSource
@@ -97,39 +140,28 @@ const TelepathyClient = new Lang.Class({
         // channel matching its filters is detected.
         // The second argument, recover, means _observeChannels will be run
         // for any existing channel as well.
-        this._tpClient = new Shell.TpClient({ name: 'GnomeShell',
-                                              account_manager: this._accountManager,
-                                              uniquify_name: true });
-        this._tpClient.set_observe_channels_func(
-            Lang.bind(this, this._observeChannels));
-        this._tpClient.set_approve_channels_func(
-            Lang.bind(this, this._approveChannels));
-        this._tpClient.set_handle_channels_func(
-            Lang.bind(this, this._handleChannels));
+        this.parent({ name: 'GnomeShell',
+                      account_manager: this._accountManager,
+                      uniquify_name: true });
+
+        // We only care about single-user text-based chats
+        let filter = {};
+        filter[Tp.PROP_CHANNEL_CHANNEL_TYPE] = Tp.IFACE_CHANNEL_TYPE_TEXT;
+        filter[Tp.PROP_CHANNEL_TARGET_HANDLE_TYPE] = Tp.HandleType.CONTACT;
+
+        this.set_observer_recover(true);
+        this.add_observer_filter(filter);
+        this.add_approver_filter(filter);
+        this.add_handler_filter(filter);
 
         // Allow other clients (such as Empathy) to pre-empt our channels if
         // needed
-        this._tpClient.set_delegated_channels_callback(
+        this.set_delegated_channels_callback(
             Lang.bind(this, this._delegatedChannelsCb));
     },
 
-    enable: function() {
-        try {
-            this._tpClient.register();
-        } catch (e) {
-            throw new Error('Couldn\'t register Telepathy client. Error: \n' + e);
-        }
-
-        if (!this._accountManager.is_prepared(Tp.AccountManager.get_feature_quark_core()))
-            this._accountManager.prepare_async(null, null);
-    },
-
-    disable: function() {
-        this._tpClient.unregister();
-    },
-
-    _observeChannels: function(observer, account, conn, channels,
-                               dispatchOp, requests, context) {
+    vfunc_observe_channels: function(account, conn, channels,
+                                     dispatchOp, requests, context) {
         let len = channels.length;
         for (let i = 0; i < len; i++) {
             let channel = channels[i];
@@ -153,7 +185,7 @@ const TelepathyClient = new Lang.Class({
         if (this._chatSources[channel.get_object_path()])
             return;
 
-        let source = new ChatSource(account, conn, channel, contact, this._tpClient);
+        let source = new ChatSource(account, conn, channel, contact, this);
 
         this._chatSources[channel.get_object_path()] = source;
         source.connect('destroy', Lang.bind(this,
@@ -162,8 +194,8 @@ const TelepathyClient = new Lang.Class({
                        }));
     },
 
-    _handleChannels: function(handler, account, conn, channels,
-                              requests, user_action_time, context) {
+    vfunc_handle_channels: function(account, conn, channels, requests,
+                                    user_action_time, context) {
         this._handlingChannels(account, conn, channels, true);
         context.accept();
     },
@@ -193,7 +225,7 @@ const TelepathyClient = new Lang.Class({
             // Telepathy spec states that handlers must foreground channels
             // in HandleChannels calls which are already being handled.
 
-            if (notify && this._tpClient.is_handling_channel(channel)) {
+            if (notify && this.is_handling_channel(channel)) {
                 // We are already handling the channel, display the source
                 let source = this._chatSources[channel.get_object_path()];
                 if (source)
@@ -202,8 +234,8 @@ const TelepathyClient = new Lang.Class({
         }
     },
 
-    _approveChannels: function(approver, account, conn, channels,
-                               dispatchOp, context) {
+    vfunc_add_dispatch_operation: function(account, conn, channels,
+                                           dispatchOp, context) {
         let channel = channels[0];
         let chanType = channel.get_channel_type();
 
@@ -230,7 +262,7 @@ const TelepathyClient = new Lang.Class({
         }
 
         // Approve private text channels right away as we are going to handle it
-        dispatchOp.claim_with_async(this._tpClient, Lang.bind(this, function(dispatchOp, result) {
+        dispatchOp.claim_with_async(this, Lang.bind(this, function(dispatchOp, result) {
             try {
                 dispatchOp.claim_with_finish(result);
                 this._handlingChannels(account, conn, [channel], false);
@@ -246,9 +278,9 @@ const TelepathyClient = new Lang.Class({
         // Nothing to do as we don't make a distinction between observed and
         // handled channels.
     },
-});
+}) : null;
 
-const ChatSource = new Lang.Class({
+var ChatSource = new Lang.Class({
     Name: 'ChatSource',
     Extends: MessageTray.Source,
 
@@ -615,7 +647,7 @@ const ChatSource = new Lang.Class({
     }
 });
 
-const ChatNotification = new Lang.Class({
+var ChatNotification = new Lang.Class({
     Name: 'ChatNotification',
     Extends: MessageTray.Notification,
 
@@ -660,7 +692,9 @@ const ChatNotification = new Lang.Class({
         }
 
         if (message.direction == NotificationDirection.RECEIVED)
-            this.update(this.source.title, messageBody, { bannerMarkup: true });
+            this.update(this.source.title, messageBody,
+                        { datetime: GLib.DateTime.new_from_unix_local (message.timestamp),
+                          bannerMarkup: true });
 
         let group = (message.direction == NotificationDirection.RECEIVED ?
                      'received' : 'sent');
@@ -772,7 +806,7 @@ const ChatNotification = new Lang.Class({
     }
 });
 
-const ChatLineBox = new Lang.Class({
+var ChatLineBox = new Lang.Class({
     Name: 'ChatLineBox',
     Extends: St.BoxLayout,
 
@@ -782,7 +816,7 @@ const ChatLineBox = new Lang.Class({
     }
 });
 
-const ChatNotificationBanner = new Lang.Class({
+var ChatNotificationBanner = new Lang.Class({
     Name: 'ChatNotificationBanner',
     Extends: MessageTray.NotificationBanner,
 
@@ -962,4 +996,4 @@ const ChatNotificationBanner = new Lang.Class({
     }
 });
 
-const Component = TelepathyClient;
+var Component = TelepathyComponent;

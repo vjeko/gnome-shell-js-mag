@@ -13,7 +13,7 @@ const Main = imports.ui.main;
 const Params = imports.misc.params;
 const PopupMenu = imports.ui.popupMenu;
 
-const ButtonBox = new Lang.Class({
+var ButtonBox = new Lang.Class({
     Name: 'ButtonBox',
 
     _init: function(params) {
@@ -89,7 +89,7 @@ const ButtonBox = new Lang.Class({
     },
 });
 
-const Button = new Lang.Class({
+var Button = new Lang.Class({
     Name: 'PanelMenuButton',
     Extends: ButtonBox,
 
@@ -174,8 +174,14 @@ const Button = new Lang.Class({
         // menu is higher then the screen; it's useful if part of the menu is
         // scrollable so the minimum height is smaller than the natural height
         let workArea = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
+        let scaleFactor = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         let verticalMargins = this.menu.actor.margin_top + this.menu.actor.margin_bottom;
-        this.menu.actor.style = ('max-height: ' + Math.round(workArea.height - verticalMargins) + 'px;');
+
+        // The workarea and margin dimensions are in physical pixels, but CSS
+        // measures are in logical pixels, so make sure to consider the scale
+        // factor when computing max-height
+        let maxHeight = Math.round((workArea.height - verticalMargins) / scaleFactor);
+        this.menu.actor.style = ('max-height: %spx;').format(maxHeight);
     },
 
     destroy: function() {
@@ -197,7 +203,7 @@ Signals.addSignalMethods(Button.prototype);
  * of an icon and a menu section, which will be composed into the
  * aggregate menu.
  */
-const SystemIndicator = new Lang.Class({
+var SystemIndicator = new Lang.Class({
     Name: 'SystemIndicator',
 
     _init: function() {

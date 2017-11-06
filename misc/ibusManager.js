@@ -6,10 +6,11 @@ const Lang = imports.lang;
 const Mainloop = imports.mainloop;
 const Signals = imports.signals;
 
+let IBusCandidatePopup;
 try {
     var IBus = imports.gi.IBus;
     _checkIBusVersion(1, 5, 2);
-    const IBusCandidatePopup = imports.ui.ibusCandidatePopup;
+    IBusCandidatePopup = imports.ui.ibusCandidatePopup;
 } catch (e) {
     var IBus = null;
     log(e);
@@ -35,7 +36,7 @@ function getIBusManager() {
     return _ibusManager;
 }
 
-const IBusManager = new Lang.Class({
+var IBusManager = new Lang.Class({
     Name: 'IBusManager',
 
     // This is the longest we'll keep the keyboard frozen until an input
@@ -189,7 +190,7 @@ const IBusManager = new Lang.Class({
     },
 
     getEngineDesc: function(id) {
-        if (!IBus || !this._ready)
+        if (!IBus || !this._ready || !this._engines.hasOwnProperty(id))
             return null;
 
         return this._engines[id];

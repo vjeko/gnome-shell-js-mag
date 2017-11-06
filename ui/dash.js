@@ -18,10 +18,10 @@ const Main = imports.ui.main;
 const Tweener = imports.ui.tweener;
 const Workspace = imports.ui.workspace;
 
-const DASH_ANIMATION_TIME = 0.2;
-const DASH_ITEM_LABEL_SHOW_TIME = 0.15;
-const DASH_ITEM_LABEL_HIDE_TIME = 0.1;
-const DASH_ITEM_HOVER_TIMEOUT = 300;
+var DASH_ANIMATION_TIME = 0.2;
+var DASH_ITEM_LABEL_SHOW_TIME = 0.15;
+var DASH_ITEM_LABEL_HIDE_TIME = 0.1;
+var DASH_ITEM_HOVER_TIMEOUT = 300;
 
 function getAppFromSource(source) {
     if (source instanceof AppDisplay.AppIcon) {
@@ -33,7 +33,7 @@ function getAppFromSource(source) {
 
 // A container like StBin, but taking the child's scale into account
 // when requesting a size
-const DashItemContainer = new Lang.Class({
+var DashItemContainer = new Lang.Class({
     Name: 'DashItemContainer',
     Extends: St.Widget,
 
@@ -235,7 +235,7 @@ const DashItemContainer = new Lang.Class({
     }
 });
 
-const ShowAppsIcon = new Lang.Class({
+var ShowAppsIcon = new Lang.Class({
     Name: 'ShowAppsIcon',
     Extends: DashItemContainer,
 
@@ -315,7 +315,7 @@ const ShowAppsIcon = new Lang.Class({
     }
 });
 
-const DragPlaceholderItem = new Lang.Class({
+var DragPlaceholderItem = new Lang.Class({
     Name: 'DragPlaceholderItem',
     Extends: DashItemContainer,
 
@@ -325,7 +325,7 @@ const DragPlaceholderItem = new Lang.Class({
     }
 });
 
-const EmptyDropTargetItem = new Lang.Class({
+var EmptyDropTargetItem = new Lang.Class({
     Name: 'EmptyDropTargetItem',
     Extends: DashItemContainer,
 
@@ -335,7 +335,7 @@ const EmptyDropTargetItem = new Lang.Class({
     }
 });
 
-const DashActor = new Lang.Class({
+var DashActor = new Lang.Class({
     Name: 'DashActor',
     Extends: St.Widget,
 
@@ -387,7 +387,7 @@ const DashActor = new Lang.Class({
 
 const baseIconSizes = [ 16, 22, 24, 32, 48, 64 ];
 
-const Dash = new Lang.Class({
+var Dash = new Lang.Class({
     Name: 'Dash',
 
     _init : function() {
@@ -756,42 +756,44 @@ const Dash = new Lang.Class({
         let newIndex = 0;
         let oldIndex = 0;
         while (newIndex < newApps.length || oldIndex < oldApps.length) {
+            let oldApp = oldApps.length > oldIndex ? oldApps[oldIndex] : null;
+            let newApp = newApps.length > newIndex ? newApps[newIndex] : null;
+
             // No change at oldIndex/newIndex
-            if (oldApps[oldIndex] == newApps[newIndex]) {
+            if (oldApp == newApp) {
                 oldIndex++;
                 newIndex++;
                 continue;
             }
 
             // App removed at oldIndex
-            if (oldApps[oldIndex] &&
-                newApps.indexOf(oldApps[oldIndex]) == -1) {
+            if (oldApp && newApps.indexOf(oldApp) == -1) {
                 removedActors.push(children[oldIndex]);
                 oldIndex++;
                 continue;
             }
 
             // App added at newIndex
-            if (newApps[newIndex] &&
-                oldApps.indexOf(newApps[newIndex]) == -1) {
-                addedItems.push({ app: newApps[newIndex],
-                                  item: this._createAppItem(newApps[newIndex]),
+            if (newApp && oldApps.indexOf(newApp) == -1) {
+                addedItems.push({ app: newApp,
+                                  item: this._createAppItem(newApp),
                                   pos: newIndex });
                 newIndex++;
                 continue;
             }
 
             // App moved
-            let insertHere = newApps[newIndex + 1] &&
-                             newApps[newIndex + 1] == oldApps[oldIndex];
+            let nextApp = newApps.length > newIndex + 1 ? newApps[newIndex + 1]
+                                                        : null;
+            let insertHere = nextApp && nextApp == oldApp;
             let alreadyRemoved = removedActors.reduce(function(result, actor) {
                 let removedApp = actor.child._delegate.app;
-                return result || removedApp == newApps[newIndex];
+                return result || removedApp == newApp;
             }, false);
 
             if (insertHere || alreadyRemoved) {
-                let newItem = this._createAppItem(newApps[newIndex]);
-                addedItems.push({ app: newApps[newIndex],
+                let newItem = this._createAppItem(newApp);
+                addedItems.push({ app: newApp,
                                   item: newItem,
                                   pos: newIndex + removedActors.length });
                 newIndex++;

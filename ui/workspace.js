@@ -18,29 +18,29 @@ const Overview = imports.ui.overview;
 const Tweener = imports.ui.tweener;
 const WindowManager = imports.ui.windowManager;
 
-const WINDOW_DND_SIZE = 256;
+var WINDOW_DND_SIZE = 256;
 
-const WINDOW_CLONE_MAXIMUM_SCALE = 0.7;
+var WINDOW_CLONE_MAXIMUM_SCALE = 1.0;
 
-const CLOSE_BUTTON_FADE_TIME = 0.1;
+var CLOSE_BUTTON_FADE_TIME = 0.1;
 
-const DRAGGING_WINDOW_OPACITY = 100;
+var DRAGGING_WINDOW_OPACITY = 100;
 
 // When calculating a layout, we calculate the scale of windows and the percent
 // of the available area the new layout uses. If the values for the new layout,
 // when weighted with the values as below, are worse than the previous layout's,
 // we stop looking for a new layout and use the previous layout.
 // Otherwise, we keep looking for a new layout.
-const LAYOUT_SCALE_WEIGHT = 1;
-const LAYOUT_SPACE_WEIGHT = 0.1;
+var LAYOUT_SCALE_WEIGHT = 1;
+var LAYOUT_SPACE_WEIGHT = 0.1;
 
-const WINDOW_ANIMATION_MAX_NUMBER_BLENDING = 3;
+var WINDOW_ANIMATION_MAX_NUMBER_BLENDING = 3;
 
 function _interpolate(start, end, step) {
     return start + (end - start) * step;
 }
 
-const WindowCloneLayout = new Lang.Class({
+var WindowCloneLayout = new Lang.Class({
     Name: 'WindowCloneLayout',
     Extends: Clutter.LayoutManager,
 
@@ -102,7 +102,7 @@ const WindowCloneLayout = new Lang.Class({
     }
 });
 
-const WindowClone = new Lang.Class({
+var WindowClone = new Lang.Class({
     Name: 'WindowClone',
 
     _init : function(realWindow, workspace) {
@@ -132,6 +132,7 @@ const WindowClone = new Lang.Class({
 
         this.actor._delegate = this;
 
+        this.slotId = 0;
         this._slot = [0, 0, 0, 0];
         this._dragSlot = [0, 0, 0, 0];
         this._stackAbove = null;
@@ -156,6 +157,12 @@ const WindowClone = new Lang.Class({
         this.actor.add_action(clickAction);
         this.actor.connect('destroy', Lang.bind(this, this._onDestroy));
         this.actor.connect('key-press-event', Lang.bind(this, this._onKeyPress));
+
+        this.actor.connect('enter-event', () => { this.emit('show-chrome'); });
+        this.actor.connect('key-focus-in', () => { this.emit('show-chrome'); });
+
+        this.actor.connect('leave-event', () => { this.emit('hide-chrome'); });
+        this.actor.connect('key-focus-out', () => { this.emit('hide-chrome'); });
 
         this._draggable = DND.makeDraggable(this.actor,
                                             { restoreOnSuccess: true,
@@ -374,6 +381,8 @@ const WindowClone = new Lang.Class({
                     action.release();
                     this._draggable.startDrag(x, y, global.get_current_time(), this._dragTouchSequence);
                 }));
+        } else {
+            this.emit('show-chrome');
         }
         return true;
     },
@@ -423,7 +432,7 @@ Signals.addSignalMethods(WindowClone.prototype);
  * @parentActor: The actor which will be the parent of all overlay items
  *               such as app icon and window caption
  */
-const WindowOverlay = new Lang.Class({
+var WindowOverlay = new Lang.Class({
     Name: 'WindowOverlay',
 
     _init : function(windowClone, parentActor) {
@@ -439,7 +448,6 @@ const WindowOverlay = new Lang.Class({
         let title = new St.Label({ style_class: 'window-caption',
                                    text: metaWindow.title });
         title.clutter_text.ellipsize = Pango.EllipsizeMode.END;
-        title._spacing = 0;
         windowClone.actor.label_actor = title;
 
         this._updateCaptionId = metaWindow.connect('notify::title',
@@ -455,24 +463,23 @@ const WindowOverlay = new Lang.Class({
         button.connect('clicked', Lang.bind(this, this._closeWindow));
 
         windowClone.actor.connect('destroy', Lang.bind(this, this._onDestroy));
-        windowClone.actor.connect('enter-event',
-                                  Lang.bind(this, this._onEnter));
-        windowClone.actor.connect('leave-event',
-                                  Lang.bind(this, this._onLeave));
-        windowClone.actor.connect('key-focus-in',
-                                  Lang.bind(this, this._onEnter));
-        windowClone.actor.connect('key-focus-out',
-                                  Lang.bind(this, this._onLeave));
+        windowClone.connect('show-chrome', Lang.bind(this, this._onShowChrome));
+        windowClone.connect('hide-chrome', Lang.bind(this, this._onHideChrome));
 
         this._windowAddedId = 0;
 
         button.hide();
+        title.hide();
 
         this.title = title;
         this.closeButton = button;
 
-        parentActor.add_actor(this.title);
+        // Don't block drop targets
+        Shell.util_set_hidden_from_pick(this.title, true);
+        Shell.util_set_hidden_from_pick(this.border, true);
+
         parentActor.add_actor(this.border);
+        parentActor.add_actor(this.title);
         parentActor.add_actor(this.closeButton);
         title.connect('style-changed',
                       Lang.bind(this, this._onStyleChanged));
@@ -487,7 +494,6 @@ const WindowOverlay = new Lang.Class({
 
     hide: function() {
         this._hidden = true;
-        this.title.hide();
 
         this.hideCloseButton();
     },
@@ -495,14 +501,13 @@ const WindowOverlay = new Lang.Class({
     show: function() {
         this._hidden = false;
 
-        this.title.show();
-        if (this._windowClone.actor.has_pointer)
+        if (this._windowClone.actor['has-pointer'])
             this._animateVisible();
     },
 
     chromeHeights: function () {
         return [Math.max(this.borderSize, this.closeButton.height - this.closeButton._overlap),
-                this.title.height + this.title._spacing];
+                (this.title.height - this.borderSize) / 2];
     },
 
     chromeWidths: function () {
@@ -536,24 +541,13 @@ const WindowOverlay = new Lang.Class({
         else
             button.set_position(Math.floor(buttonX), Math.floor(buttonY));
 
-        // Clutter.Actor.get_preferred_width() will return the fixed width if one
-        // is set, so we need to reset the width by calling set_width(-1), to forward
-        // the call down to StLabel.
-        // We also need to save and restore the current width, otherwise the animation
-        // starts from the wrong point.
-        let prevTitleWidth = title.width;
-        title.set_width(-1);
-        let [titleMinWidth, titleNatWidth] = title.get_preferred_width(-1);
-        let titleWidth = Math.max(titleMinWidth, Math.min(titleNatWidth, cloneWidth));
-        title.width = prevTitleWidth;
+        let titleX = cloneX + (cloneWidth - title.width) / 2;
+        let titleY = cloneY + cloneHeight - (title.height - this.borderSize) / 2;
 
-        let titleX = cloneX + (cloneWidth - titleWidth) / 2;
-        let titleY = cloneY + cloneHeight + title._spacing;
-
-        if (animate)
-            this._animateOverlayActor(title, Math.floor(titleX), Math.floor(titleY), titleWidth);
-        else {
-            title.width = titleWidth;
+        if (animate) {
+            this._animateOverlayActor(title, Math.floor(titleX), Math.floor(titleY), title.width);
+        } else {
+            title.width = title.width;
             title.set_position(Math.floor(titleX), Math.floor(titleY));
         }
 
@@ -636,67 +630,55 @@ const WindowOverlay = new Lang.Class({
     _animateVisible: function() {
         this._parentActor.raise_top();
 
-        if (this._windowCanClose()) {
-            this.closeButton.show();
-            this.closeButton.opacity = 0;
-            Tweener.addTween(this.closeButton,
+        let toAnimate = [this.border, this.title];
+        if (this._windowCanClose())
+            toAnimate.push(this.closeButton);
+
+        toAnimate.forEach(a => {
+            a.show();
+            a.opacity = 0;
+            Tweener.addTween(a,
                              { opacity: 255,
                                time: CLOSE_BUTTON_FADE_TIME,
                                transition: 'easeOutQuad' });
-        }
-
-        this.border.show();
-        this.border.opacity = 0;
-        Tweener.addTween(this.border,
-                         { opacity: 255,
-                           time: CLOSE_BUTTON_FADE_TIME,
-                           transition: 'easeOutQuad' });
-
-        this.title.add_style_pseudo_class('hover');
+        });
     },
 
     _animateInvisible: function() {
-        this.closeButton.opacity = 255;
-        Tweener.addTween(this.closeButton,
-                         { opacity: 0,
-                           time: CLOSE_BUTTON_FADE_TIME,
-                           transition: 'easeInQuad' });
-
-        this.border.opacity = 255;
-        Tweener.addTween(this.border,
-                         { opacity: 0,
-                           time: CLOSE_BUTTON_FADE_TIME,
-                           transition: 'easeInQuad' });
-
-        this.title.remove_style_pseudo_class('hover');
+        [this.closeButton, this.border, this.title].forEach(a => {
+            a.opacity = 255;
+            Tweener.addTween(a,
+                             { opacity: 0,
+                               time: CLOSE_BUTTON_FADE_TIME,
+                               transition: 'easeInQuad' });
+        });
     },
 
-    _onEnter: function() {
+    _onShowChrome: function() {
         // We might get enter events on the clone while the overlay is
         // hidden, e.g. during animations, we ignore these events,
         // as the close button will be shown as needed when the overlays
         // are shown again
         if (this._hidden)
-            return Clutter.EVENT_PROPAGATE;
+            return;
 
+        this._windowClone.actor.grab_key_focus();
         this._animateVisible();
         this.emit('show-close-button');
-        return Clutter.EVENT_PROPAGATE;
     },
 
-    _onLeave: function() {
+    _onHideChrome: function() {
         if (this._idleToggleCloseId == 0) {
             this._idleToggleCloseId = Mainloop.timeout_add(750, Lang.bind(this, this._idleToggleCloseButton));
             GLib.Source.set_name_by_id(this._idleToggleCloseId, '[gnome-shell] this._idleToggleCloseButton');
         }
-        return Clutter.EVENT_PROPAGATE;
     },
 
     _idleToggleCloseButton: function() {
         this._idleToggleCloseId = 0;
 
-        if (!this._windowClone.actor.has_pointer &&
-            !this.closeButton.has_pointer)
+        if (!this._windowClone.actor['has-pointer'] &&
+            !this.closeButton['has-pointer'])
             this._animateInvisible();
 
         return GLib.SOURCE_REMOVE;
@@ -709,13 +691,10 @@ const WindowOverlay = new Lang.Class({
         }
         this.closeButton.hide();
         this.border.hide();
-        this.title.remove_style_pseudo_class('hover');
+        this.title.hide();
     },
 
     _onStyleChanged: function() {
-        let titleNode = this.title.get_theme_node();
-        this.title._spacing = titleNode.get_length('-shell-caption-spacing');
-
         let closeNode = this.closeButton.get_theme_node();
         this.closeButton._overlap = closeNode.get_length('-shell-close-overlap');
 
@@ -727,7 +706,7 @@ const WindowOverlay = new Lang.Class({
 });
 Signals.addSignalMethods(WindowOverlay.prototype);
 
-const WindowPositionFlags = {
+var WindowPositionFlags = {
     NONE: 0,
     INITIAL: 1 << 0,
     ANIMATE: 1 << 1
@@ -807,7 +786,7 @@ const WindowPositionFlags = {
 // each window's "cell" area to be the same, but we shrink the thumbnail
 // and center it horizontally, and align it to the bottom vertically.
 
-const LayoutStrategy = new Lang.Class({
+var LayoutStrategy = new Lang.Class({
     Name: 'LayoutStrategy',
     Abstract: true,
 
@@ -971,6 +950,10 @@ const LayoutStrategy = new Lang.Class({
                 let cloneX = x + (cellWidth - cloneWidth) / 2;
                 let cloneY = row.y + row.height * row.additionalScale - cellHeight + compensation;
 
+                // Align with the pixel grid to prevent blurry windows at scale = 1
+                cloneX = Math.floor(cloneX);
+                cloneY = Math.floor(cloneY);
+
                 slots.push([cloneX, cloneY, s, window]);
                 x += cellWidth + this._columnSpacing;
             }
@@ -979,7 +962,7 @@ const LayoutStrategy = new Lang.Class({
     }
 });
 
-const UnalignedLayoutStrategy = new Lang.Class({
+var UnalignedLayoutStrategy = new Lang.Class({
     Name: 'UnalignedLayoutStrategy',
     Extends: LayoutStrategy,
 
@@ -1087,15 +1070,32 @@ function rectEqual(one, two) {
             one.height == two.height);
 }
 
+const WorkspaceActor = new Lang.Class({
+    Name: 'WorkspaceActor',
+    Extends: St.Widget,
+
+    vfunc_get_focus_chain: function() {
+        return this.get_children().filter(c => c.visible).sort((a,b) => {
+            let cloneA = (a._delegate && a._delegate instanceof WindowClone) ? a._delegate: null;
+            let cloneB = (b._delegate && b._delegate instanceof WindowClone) ? b._delegate: null;
+            if (cloneA && cloneB)
+                return cloneA.slotId - cloneB.slotId;
+
+            return 0;
+        });
+    }
+});
+
 /**
  * @metaWorkspace: a #Meta.Workspace, or null
  */
-const Workspace = new Lang.Class({
+var Workspace = new Lang.Class({
     Name: 'Workspace',
 
     _init : function(metaWorkspace, monitorIndex) {
         // When dragging a window, we use this slot for reserve space.
         this._reservedSlot = null;
+        this._reservedSlotWindow = null;
         this.metaWorkspace = metaWorkspace;
 
         // The full geometry is the geometry we should try and position
@@ -1108,6 +1108,7 @@ const Workspace = new Lang.Class({
         // do some simple aspect ratio like math to fit the layout calculated
         // for the full geometry into this area.
         this._actualGeometry = null;
+        this._actualGeometryLater = 0;
 
         this._currentLayout = null;
 
@@ -1117,7 +1118,7 @@ const Workspace = new Lang.Class({
         // Without this the drop area will be overlapped.
         this._windowOverlaysGroup.set_size(0, 0);
 
-        this.actor = new St.Widget({ style_class: 'window-picker' });
+        this.actor = new WorkspaceActor({ style_class: 'window-picker' });
         if (monitorIndex != Main.layoutManager.primaryIndex)
             this.actor.add_style_class_name('external-monitor');
         this.actor.set_size(0, 0);
@@ -1789,14 +1790,20 @@ const Workspace = new Lang.Class({
         global.screen.disconnect(this._windowEnteredMonitorId);
         global.screen.disconnect(this._windowLeftMonitorId);
 
-        if (this._repositionWindowsId > 0)
+        if (this._repositionWindowsId > 0) {
             Mainloop.source_remove(this._repositionWindowsId);
+            this._repositionWindowsId = 0;
+        }
 
-        if (this._positionWindowsId > 0)
+        if (this._positionWindowsId > 0) {
             Meta.later_remove(this._positionWindowsId);
+            this._positionWindowsId = 0;
+        }
 
-        if (this._actualGeometryLater > 0)
+        if (this._actualGeometryLater > 0) {
             Meta.later_remove(this._actualGeometryLater);
+            this._actualGeometryLater = 0;
+        }
 
         this._windows = [];
     },
@@ -1940,19 +1947,16 @@ const Workspace = new Lang.Class({
             right: node.get_padding(St.Side.RIGHT),
         };
 
-        let closeButtonHeight, captionHeight;
-        let leftBorder, rightBorder;
-
         // All of the overlays have the same chrome sizes,
         // so just pick the first one.
         let overlay = this._windowOverlays[0];
-        [closeButtonHeight, captionHeight] = overlay.chromeHeights();
-        [leftBorder, rightBorder] = overlay.chromeWidths();
+        let [topBorder, bottomBorder] = overlay.chromeHeights();
+        let [leftBorder, rightBorder] = overlay.chromeWidths();
 
-        rowSpacing += captionHeight;
+        rowSpacing += (topBorder + bottomBorder) / 2;
         columnSpacing += (rightBorder + leftBorder) / 2;
-        padding.top += closeButtonHeight;
-        padding.bottom += captionHeight;
+        padding.top += topBorder;
+        padding.bottom += bottomBorder;
         padding.left += leftBorder;
         padding.right += rightBorder;
 

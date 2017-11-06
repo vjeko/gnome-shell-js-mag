@@ -6,12 +6,15 @@ const Signals = imports.signals;
 
 const Main = imports.ui.main;
 
+// In alphabetical order
 const RENAMED_DESKTOP_IDS = {
     'baobab.desktop': 'org.gnome.baobab.desktop',
     'cheese.desktop': 'org.gnome.Cheese.desktop',
     'dconf-editor.desktop': 'ca.desrt.dconf-editor.desktop',
+    'empathy.desktop': 'org.gnome.Empathy.desktop',
+    'epiphany.desktop': 'org.gnome.Epiphany.desktop',
     'file-roller.desktop': 'org.gnome.FileRoller.desktop',
-    'gcalctool.desktop': 'gnome-calculator.desktop',
+    'gcalctool.desktop': 'org.gnome.Calculator.desktop',
     'geary.desktop': 'org.gnome.Geary.desktop',
     'gedit.desktop': 'org.gnome.gedit.desktop',
     'glchess.desktop': 'gnome-chess.desktop',
@@ -20,11 +23,13 @@ const RENAMED_DESKTOP_IDS = {
     'gnibbles.desktop': 'org.gnome.Nibbles.desktop',
     'gnobots2.desktop': 'gnome-robots.desktop',
     'gnome-boxes.desktop': 'org.gnome.Boxes.desktop',
+    'gnome-calculator.desktop': 'org.gnome.Calculator.desktop',
     'gnome-clocks.desktop': 'org.gnome.clocks.desktop',
     'gnome-contacts.desktop': 'org.gnome.Contacts.desktop',
     'gnome-documents.desktop': 'org.gnome.Documents.desktop',
     'gnome-font-viewer.desktop': 'org.gnome.font-viewer.desktop',
     'gnome-nibbles.desktop': 'org.gnome.Nibbles.desktop',
+    'gnome-music.desktop': 'org.gnome.Music.desktop',
     'gnome-photos.desktop': 'org.gnome.Photos.desktop',
     'gnome-screenshot.desktop': 'org.gnome.Screenshot.desktop',
     'gnome-software.desktop': 'org.gnome.Software.desktop',
@@ -39,7 +44,7 @@ const RENAMED_DESKTOP_IDS = {
     'totem.desktop': 'org.gnome.Totem.desktop',
 };
 
-const AppFavorites = new Lang.Class({
+var AppFavorites = new Lang.Class({
     Name: 'AppFavorites',
 
     FAVORITE_APPS_KEY: 'favorite-apps',

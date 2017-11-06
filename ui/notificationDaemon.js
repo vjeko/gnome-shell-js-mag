@@ -67,14 +67,14 @@ const FdoNotificationsIface = '<node> \
 </interface> \
 </node>';
 
-const NotificationClosedReason = {
+var NotificationClosedReason = {
     EXPIRED: 1,
     DISMISSED: 2,
     APP_CLOSED: 3,
     UNDEFINED: 4
 };
 
-const Urgency = {
+var Urgency = {
     LOW: 0,
     NORMAL: 1,
     CRITICAL: 2
@@ -91,7 +91,7 @@ const rewriteRules = {
     ]
 };
 
-const FdoNotificationDaemon = new Lang.Class({
+var FdoNotificationDaemon = new Lang.Class({
     Name: 'FdoNotificationDaemon',
 
     _init: function() {
@@ -128,10 +128,10 @@ const FdoNotificationDaemon = new Lang.Class({
         switch (hints.urgency) {
             case Urgency.LOW:
             case Urgency.NORMAL:
-                stockIcon = 'gtk-dialog-info';
+                stockIcon = 'dialog-information';
                 break;
             case Urgency.CRITICAL:
-                stockIcon = 'gtk-dialog-error';
+                stockIcon = 'dialog-error';
                 break;
         }
         return new Gio.ThemedIcon({ name: stockIcon });
@@ -186,7 +186,8 @@ const FdoNotificationDaemon = new Lang.Class({
             return source;
         }
 
-        let source = new FdoNotificationDaemonSource(title, pid, sender, ndata ? ndata.hints['desktop-entry'] : null);
+        let appId = ndata ? ndata.hints['desktop-entry'] || null : null;
+        source = new FdoNotificationDaemonSource(title, pid, sender, appId);
 
         this._sources.push(source);
         source.connect('destroy', Lang.bind(this, function() {
@@ -391,10 +392,10 @@ const FdoNotificationDaemon = new Lang.Class({
                 notification.setUrgency(MessageTray.Urgency.CRITICAL);
                 break;
         }
-        notification.setResident(hints.resident == true);
+        notification.setResident(!!hints.resident);
         // 'transient' is a reserved keyword in JS, so we have to retrieve the value
         // of the 'transient' hint with hints['transient'] rather than hints.transient
-        notification.setTransient(hints['transient'] == true);
+        notification.setTransient(!!hints['transient']);
 
         let sourceGIcon = source.useNotificationIcon ? gicon : null;
         source.processNotification(notification, sourceGIcon);
@@ -458,7 +459,7 @@ const FdoNotificationDaemon = new Lang.Class({
     }
 });
 
-const FdoNotificationDaemonSource = new Lang.Class({
+var FdoNotificationDaemonSource = new Lang.Class({
     Name: 'FdoNotificationDaemonSource',
     Extends: MessageTray.Source,
 
@@ -585,7 +586,7 @@ const PRIORITY_URGENCY_MAP = {
     urgent: MessageTray.Urgency.CRITICAL
 };
 
-const GtkNotificationDaemonNotification = new Lang.Class({
+var GtkNotificationDaemonNotification = new Lang.Class({
     Name: 'GtkNotificationDaemonNotification',
     Extends: MessageTray.Notification,
 
@@ -600,7 +601,8 @@ const GtkNotificationDaemonNotification = new Lang.Class({
               "priority": priority,
               "buttons": buttons,
               "default-action": defaultAction,
-              "default-action-target": defaultActionTarget } = notification;
+              "default-action-target": defaultActionTarget,
+              "timestamp": time } = notification;
 
         if (priority) {
             let urgency = PRIORITY_URGENCY_MAP[priority.unpack()];
@@ -623,7 +625,8 @@ const GtkNotificationDaemonNotification = new Lang.Class({
         this._defaultActionTarget = defaultActionTarget;
 
         this.update(title.unpack(), body ? body.unpack() : null,
-                    { gicon: gicon ? Gio.icon_deserialize(gicon) : null });
+                    { gicon: gicon ? Gio.icon_deserialize(gicon) : null,
+                      datetime : time ? GLib.DateTime.new_from_unix_local(time.unpack()) : null });
     },
 
     _activateAction: function(namespacedActionId, target) {
@@ -667,7 +670,7 @@ const FdoApplicationIface = '<node> \
 const FdoApplicationProxy = Gio.DBusProxy.makeProxyWrapper(FdoApplicationIface);
 
 function objectPathFromAppId(appId) {
-    return '/' + appId.replace(/\./g, '/');
+    return '/' + appId.replace(/\./g, '/').replace(/-/g, '_');
 }
 
 function getPlatformData() {
@@ -677,13 +680,15 @@ function getPlatformData() {
 
 function InvalidAppError() {}
 
-const GtkNotificationDaemonAppSource = new Lang.Class({
+var GtkNotificationDaemonAppSource = new Lang.Class({
     Name: 'GtkNotificationDaemonAppSource',
     Extends: MessageTray.Source,
 
     _init: function(appId) {
         this._appId = appId;
         this._objectPath = objectPathFromAppId(appId);
+        if (!GLib.Variant.is_object_path(this._objectPath))
+            throw new InvalidAppError();
 
         this._app = Shell.AppSystem.get_default().lookup_app(appId + '.desktop');
         if (!this._app)
@@ -703,22 +708,28 @@ const GtkNotificationDaemonAppSource = new Lang.Class({
         return new MessageTray.NotificationApplicationPolicy(this._appId);
     },
 
-    _createApp: function() {
-        return new FdoApplicationProxy(Gio.DBus.session, this._appId, this._objectPath);
+    _createApp: function(callback) {
+        return new FdoApplicationProxy(Gio.DBus.session, this._appId, this._objectPath, callback);
     },
 
     activateAction: function(actionId, target) {
-        let app = this._createApp();
-        app.ActivateActionRemote(actionId, target ? [target] : [], getPlatformData());
-
+        this._createApp(function (app, error) {
+            if (error == null)
+                app.ActivateActionRemote(actionId, target ? [target] : [], getPlatformData());
+            else
+                logError(error, 'Failed to activate application proxy');
+        });
         Main.overview.hide();
         Main.panel.closeCalendar();
     },
 
     open: function() {
-        let app = this._createApp();
-        app.ActivateRemote(getPlatformData());
-
+        this._createApp(function (app, error) {
+            if (error == null)
+                app.ActivateRemote(getPlatformData());
+            else
+                logError(error, 'Failed to open application proxy');
+        });
         Main.overview.hide();
         Main.panel.closeCalendar();
     },
@@ -778,7 +789,7 @@ const GtkNotificationsIface = '<node> \
 </interface> \
 </node>';
 
-const GtkNotificationDaemon = new Lang.Class({
+var GtkNotificationDaemon = new Lang.Class({
     Name: 'GtkNotificationDaemon',
 
     _init: function() {
@@ -858,6 +869,9 @@ const GtkNotificationDaemon = new Lang.Class({
             return;
         }
 
+        let timestamp = GLib.DateTime.new_now_local().to_unix();
+        notification['timestamp'] = new GLib.Variant('x', timestamp);
+
         source.addNotification(notificationId, notification, true);
 
         invocation.return_value(null);
@@ -873,7 +887,7 @@ const GtkNotificationDaemon = new Lang.Class({
     },
 });
 
-const NotificationDaemon = new Lang.Class({
+var NotificationDaemon = new Lang.Class({
     Name: 'NotificationDaemon',
 
     _init: function() {

@@ -10,14 +10,14 @@ const St = imports.gi.St;
 const Main = imports.ui.main;
 const Tweener = imports.ui.tweener;
 
-const PopupAnimation = {
+var PopupAnimation = {
     NONE:  0,
     SLIDE: 1 << 0,
     FADE:  1 << 1,
     FULL:  ~0,
 };
 
-const POPUP_ANIMATION_TIME = 0.15;
+var POPUP_ANIMATION_TIME = 0.15;
 
 /**
  * BoxPointer:
@@ -32,7 +32,7 @@ const POPUP_ANIMATION_TIME = 0.15;
  * totally inside the monitor if possible.
  *
  */
-const BoxPointer = new Lang.Class({
+var BoxPointer = new Lang.Class({
     Name: 'BoxPointer',
 
     _init: function(arrowSide, binProperties) {
@@ -587,7 +587,10 @@ const BoxPointer = new Lang.Class({
     _calculateArrowSide: function(arrowSide) {
         let sourceAllocation = Shell.util_get_transformed_allocation(this._sourceActor);
         let [minWidth, minHeight, boxWidth, boxHeight] = this._container.get_preferred_size();
-        let monitor = Main.layoutManager.findMonitorForActor(this.actor);
+        let monitorActor = this.sourceActor;
+        if (!monitorActor)
+            monitorActor = this.actor;
+        let monitor = Main.layoutManager.findMonitorForActor(monitorActor);
 
         switch (arrowSide) {
         case St.Side.TOP:

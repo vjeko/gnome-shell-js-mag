@@ -7,11 +7,12 @@ const Gvc = imports.gi.Gvc;
 const St = imports.gi.St;
 const Signals = imports.signals;
 
+const Main = imports.ui.main;
 const PanelMenu = imports.ui.panelMenu;
 const PopupMenu = imports.ui.popupMenu;
 const Slider = imports.ui.slider;
 
-const VOLUME_NOTIFY_ID = 1;
+var VOLUME_NOTIFY_ID = 1;
 
 // Each Gvc.MixerControl is a connection to PulseAudio,
 // so it's better to make it a singleton
@@ -26,7 +27,7 @@ function getMixerControl() {
     return _mixerControl;
 }
 
-const StreamSlider = new Lang.Class({
+var StreamSlider = new Lang.Class({
     Name: 'StreamSlider',
 
     _init: function(control) {
@@ -149,11 +150,18 @@ const StreamSlider = new Lang.Class({
                 return 'audio-volume-high-symbolic';
             return 'audio-volume-medium-symbolic';
         }
+    },
+
+    getLevel: function() {
+        if (!this._stream)
+            return null;
+
+        return 100 * this._stream.volume / this._control.get_vol_max_norm();
     }
 });
 Signals.addSignalMethods(StreamSlider.prototype);
 
-const OutputStreamSlider = new Lang.Class({
+var OutputStreamSlider = new Lang.Class({
     Name: 'OutputStreamSlider',
     Extends: StreamSlider,
 
@@ -204,7 +212,7 @@ const OutputStreamSlider = new Lang.Class({
     }
 });
 
-const InputStreamSlider = new Lang.Class({
+var InputStreamSlider = new Lang.Class({
     Name: 'InputStreamSlider',
     Extends: StreamSlider,
 
@@ -247,7 +255,7 @@ const InputStreamSlider = new Lang.Class({
     }
 });
 
-const VolumeMenu = new Lang.Class({
+var VolumeMenu = new Lang.Class({
     Name: 'VolumeMenu',
     Extends: PopupMenu.PopupMenuSection,
 
@@ -298,10 +306,14 @@ const VolumeMenu = new Lang.Class({
 
     getIcon: function() {
         return this._output.getIcon();
+    },
+
+    getLevel: function() {
+        return this._output.getLevel();
     }
 });
 
-const Indicator = new Lang.Class({
+var Indicator = new Lang.Class({
     Name: 'VolumeIndicator',
     Extends: PanelMenu.SystemIndicator,
 
@@ -329,6 +341,13 @@ const Indicator = new Lang.Class({
     },
 
     _onScrollEvent: function(actor, event) {
-        return this._volumeMenu.scroll(event);
+        let result = this._volumeMenu.scroll(event);
+        if (result == Clutter.EVENT_PROPAGATE || this.menu.actor.mapped)
+            return result;
+
+        let gicon = new Gio.ThemedIcon({ name: this._volumeMenu.getIcon() });
+        let level = this._volumeMenu.getLevel();
+        Main.osdWindowManager.show(-1, gicon, null, level);
+        return result;
     }
 });

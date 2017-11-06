@@ -41,7 +41,7 @@ let _endSessionDialog = null;
 const _ITEM_ICON_SIZE = 48;
 const _DIALOG_ICON_SIZE = 48;
 
-const GSM_SESSION_MANAGER_LOGOUT_FORCE = 2;
+var GSM_SESSION_MANAGER_LOGOUT_FORCE = 2;
 
 const EndSessionDialogIface = '<node> \
 <interface name="org.gnome.SessionManager.EndSessionDialog"> \
@@ -166,7 +166,7 @@ const DialogContent = {
     4 /* DialogType.UPGRADE_RESTART */: restartUpgradeDialogContent
 };
 
-const MAX_USERS_IN_SESSION_DIALOG = 5;
+var MAX_USERS_IN_SESSION_DIALOG = 5;
 
 const LogindSessionIface = '<node> \
 <interface name="org.freedesktop.login1.Session"> \
@@ -275,7 +275,7 @@ function init() {
     _endSessionDialog = new EndSessionDialog();
 }
 
-const EndSessionDialog = new Lang.Class({
+var EndSessionDialog = new Lang.Class({
     Name: 'EndSessionDialog',
     Extends: ModalDialog.ModalDialog,
 
@@ -457,7 +457,6 @@ const EndSessionDialog = new Lang.Class({
         _setLabelText(this._descriptionLabel, description);
         _setLabelText(this._subjectLabel, subject);
 
-        let dialogContent = DialogContent[this._type];
         if (dialogContent.iconName) {
             this._iconBin.child = new St.Icon({ icon_name: dialogContent.iconName,
                                                 icon_size: _DIALOG_ICON_SIZE,

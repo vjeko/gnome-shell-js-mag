@@ -1,9 +1,12 @@
 // -*- mode: js; js-indent-level: 4; indent-tabs-mode: nil -*-
 
 const Clutter = imports.gi.Clutter;
+const Gettext = imports.gettext;
 const Gio = imports.gi.Gio;
 const GLib = imports.gi.GLib;
 const Lang = imports.lang;
+const Mainloop = imports.mainloop;
+const Signals = imports.signals;
 const Shell = imports.gi.Shell;
 const St = imports.gi.St;
 
@@ -11,7 +14,7 @@ const Main = imports.ui.main;
 const Tweener = imports.ui.tweener;
 const Params = imports.misc.params;
 
-const SCROLL_TIME = 0.1;
+var SCROLL_TIME = 0.1;
 
 // http://daringfireball.net/2010/07/improved_regex_for_matching_urls
 const _balancedParens = '\\((?:[^\\s()<>]+|(?:\\(?:[^\\s()<>]+\\)))*\\)';
@@ -161,6 +164,41 @@ function _handleSpawnError(command, err) {
     Main.notifyError(title, err.message);
 }
 
+function formatTimeSpan(date) {
+    let now = GLib.DateTime.new_now_local();
+
+    let timespan = now.difference(date);
+
+    let minutesAgo = timespan / GLib.TIME_SPAN_MINUTE;
+    let hoursAgo = timespan / GLib.TIME_SPAN_HOUR;
+    let daysAgo = timespan / GLib.TIME_SPAN_DAY;
+    let weeksAgo = daysAgo / 7;
+    let monthsAgo = daysAgo / 30;
+    let yearsAgo = weeksAgo / 52;
+
+    if (minutesAgo < 5)
+        return _("Just now");
+    if (hoursAgo < 1)
+        return Gettext.ngettext("%d minute ago",
+                                "%d minutes ago", minutesAgo).format(minutesAgo);
+    if (daysAgo < 1)
+        return Gettext.ngettext("%d hour ago",
+                                "%d hours ago", hoursAgo).format(hoursAgo);
+    if (daysAgo < 2)
+        return _("Yesterday");
+    if (daysAgo < 15)
+        return Gettext.ngettext("%d day ago",
+                                "%d days ago", daysAgo).format(daysAgo);
+    if (weeksAgo < 8)
+        return Gettext.ngettext("%d week ago",
+                                "%d weeks ago", weeksAgo).format(weeksAgo);
+    if (yearsAgo < 1)
+        return Gettext.ngettext("%d month ago",
+                                "%d months ago", monthsAgo).format(monthsAgo);
+    return Gettext.ngettext("%d year ago",
+                            "%d years ago", yearsAgo).format(yearsAgo);
+}
+
 function formatTime(time, params) {
     let date;
     // HACK: The built-in Date type sucks at timezones, which we need for the
@@ -180,11 +218,10 @@ function formatTime(time, params) {
     if (_desktopSettings == null)
         _desktopSettings = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });
     let clockFormat = _desktopSettings.get_string('clock-format');
-    let hasAmPm = date.format('%p') != '';
 
     params = Params.parse(params, { timeOnly: false });
 
-    if (clockFormat == '24h' || !hasAmPm) {
+    if (clockFormat == '24h') {
         // Show only the time if date is on today
         if (daysAgo < 1 || params.timeOnly)
             /* Translators: Time in 24h format */
@@ -243,7 +280,10 @@ function formatTime(time, params) {
             // xgettext:no-c-format
             format = N_("%B %d %Y, %l\u2236%M %p");
     }
-    return date.format(Shell.util_translate_time_string(format));
+
+    let formattedTime = date.format(Shell.util_translate_time_string(format));
+    // prepend LTR-mark to colon/ratio to force a text direction on times
+    return formattedTime.replace(/([:\u2236])/g, '\u200e$1');
 }
 
 function createTimeLabel(date, params) {
@@ -310,7 +350,7 @@ function insertSorted(array, val, cmp) {
     return pos;
 }
 
-const CloseButton = new Lang.Class({
+var CloseButton = new Lang.Class({
     Name: 'CloseButton',
     Extends: St.Button,
 
@@ -398,3 +438,94 @@ function ensureActorVisibleInScrollView(scrollView, actor) {
                        time: SCROLL_TIME,
                        transition: 'easeOutQuad' });
 }
+
+var AppSettingsMonitor = new Lang.Class({
+    Name: 'AppSettingsMonitor',
+
+    _init: function(appId, schemaId) {
+        this._appId = appId;
+        this._schemaId = schemaId;
+
+        this._app = null;
+        this._settings = null;
+        this._handlers = [];
+
+        this._schemaSource = Gio.SettingsSchemaSource.get_default();
+
+        this._appSystem = Shell.AppSystem.get_default();
+        this._appSystem.connect('installed-changed',
+                                Lang.bind(this, this._onInstalledChanged));
+        this._onInstalledChanged();
+    },
+
+    get available() {
+        return this._app != null && this._settings != null;
+    },
+
+    activateApp: function() {
+        if (this._app)
+            this._app.activate();
+    },
+
+    watchSetting: function(key, callback) {
+        let handler = { id: 0, key: key, callback: callback };
+        this._handlers.push(handler);
+
+        this._connectHandler(handler);
+    },
+
+    _connectHandler: function(handler) {
+        if (!this._settings || handler.id > 0)
+            return;
+
+        handler.id = this._settings.connect('changed::' + handler.key,
+                                            handler.callback);
+        handler.callback(this._settings, handler.key);
+    },
+
+    _disconnectHandler: function(handler) {
+        if (this._settings && handler.id > 0)
+            this._settings.disconnect(handler.id);
+        handler.id = 0;
+    },
+
+    _onInstalledChanged: function() {
+        let hadApp = (this._app != null);
+        this._app = this._appSystem.lookup_app(this._appId);
+        let haveApp = (this._app != null);
+
+        if (hadApp == haveApp)
+            return;
+
+        if (haveApp)
+            this._checkSettings();
+        else
+            this._setSettings(null);
+    },
+
+    _setSettings: function(settings) {
+        this._handlers.forEach((handler) => { this._disconnectHandler(handler); });
+
+        let hadSettings = (this._settings != null);
+        this._settings = settings;
+        let haveSettings = (this._settings != null);
+
+        this._handlers.forEach((handler) => { this._connectHandler(handler); });
+
+        if (hadSettings != haveSettings)
+            this.emit('available-changed');
+    },
+
+    _checkSettings: function() {
+        let schema = this._schemaSource.lookup(this._schemaId, true);
+        if (schema) {
+            this._setSettings(new Gio.Settings({ settings_schema: schema }));
+        } else if (this._app) {
+            Mainloop.timeout_add_seconds(1, () => {
+                this._checkSettings();
+                return GLib.SOURCE_REMOVE;
+            });
+        }
+    }
+});
+Signals.addSignalMethods(AppSettingsMonitor.prototype);

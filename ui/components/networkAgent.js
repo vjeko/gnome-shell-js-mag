@@ -12,6 +12,7 @@ const Shell = imports.gi.Shell;
 const St = imports.gi.St;
 
 const Config = imports.misc.config;
+const Dialog = imports.ui.dialog;
 const Main = imports.ui.main;
 const MessageTray = imports.ui.messageTray;
 const ModalDialog = imports.ui.modalDialog;
@@ -20,7 +21,7 @@ const ShellEntry = imports.ui.shellEntry;
 
 const VPN_UI_GROUP = 'VPN Plugin UI';
 
-const NetworkSecretDialog = new Lang.Class({
+var NetworkSecretDialog = new Lang.Class({
     Name: 'NetworkSecretDialog',
     Extends: ModalDialog.ModalDialog,
 
@@ -38,41 +39,12 @@ const NetworkSecretDialog = new Lang.Class({
         else
             this._content = this._getContent();
 
-        let mainContentBox = new St.BoxLayout({ style_class: 'prompt-dialog-main-layout',
-                                                vertical: false });
-        this.contentLayout.add(mainContentBox,
-                               { x_fill: true,
-                                 y_fill: true });
-
-        let icon = new St.Icon({ icon_name: 'dialog-password-symbolic' });
-        mainContentBox.add(icon,
-                           { x_fill:  true,
-                             y_fill:  false,
-                             x_align: St.Align.END,
-                             y_align: St.Align.START });
-
-        let messageBox = new St.BoxLayout({ style_class: 'prompt-dialog-message-layout',
-                                            vertical: true });
-        mainContentBox.add(messageBox,
-                           { y_align: St.Align.START });
-
-        let subjectLabel = new St.Label({ style_class: 'prompt-dialog-headline headline',
-                                            text: this._content.title });
-        messageBox.add(subjectLabel,
-                       { y_fill:  false,
-                         y_align: St.Align.START });
-
-        if (this._content.message != null) {
-            let descriptionLabel = new St.Label({ style_class: 'prompt-dialog-description',
-                                                  text: this._content.message });
-            descriptionLabel.clutter_text.line_wrap = true;
-            descriptionLabel.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
-
-            messageBox.add(descriptionLabel,
-                           { y_fill:  true,
-                             y_align: St.Align.START,
-                             expand: true });
-        }
+        let icon = new Gio.ThemedIcon({ name: 'dialog-password-symbolic' });
+        let contentParams = { icon,
+                              title: this._content.title,
+                              body: this._content.message };
+        let contentBox = new Dialog.MessageDialogContent(contentParams);
+        this.contentLayout.add_actor(contentBox);
 
         let layout = new Clutter.GridLayout({ orientation: Clutter.Orientation.VERTICAL });
         let secretTable = new St.Widget({ style_class: 'network-dialog-secret-table',
@@ -135,7 +107,7 @@ const NetworkSecretDialog = new Lang.Class({
                 secret.entry.clutter_text.set_password_char('\u25cf');
         }
 
-        messageBox.add(secretTable);
+        contentBox.messageBox.add(secretTable);
 
         this._okButton = { label:  _("Connect"),
                            action: Lang.bind(this, this._onOk),
@@ -357,7 +329,7 @@ const NetworkSecretDialog = new Lang.Class({
     }
 });
 
-const VPNRequestHandler = new Lang.Class({
+var VPNRequestHandler = new Lang.Class({
     Name: 'VPNRequestHandler',
 
     _init: function(agent, requestId, authHelper, serviceType, connection, hints, flags) {
@@ -603,7 +575,7 @@ const VPNRequestHandler = new Lang.Class({
     },
 });
 
-const NetworkAgent = new Lang.Class({
+var NetworkAgent = new Lang.Class({
     Name: 'NetworkAgent',
 
     _init: function() {
@@ -826,4 +798,4 @@ const NetworkAgent = new Lang.Class({
         }
     }
 });
-const Component = NetworkAgent;
+var Component = NetworkAgent;
