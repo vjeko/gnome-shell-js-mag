@@ -14,6 +14,6 @@ var GETTEXT_PACKAGE = 'gnome-shell';
 var LOCALEDIR = '/usr/share/locale';
 /* other standard directories */
 var LIBEXECDIR = '/usr/lib/gnome-shell';
-var SYSCONFDIR = '/etc';
+var VPNDIR = '/usr/lib/NetworkManager/VPN';
 /* g-i package versions */
 var LIBMUTTER_API_VERSION = '1'

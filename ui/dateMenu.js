@@ -132,8 +132,11 @@ var WorldClocksSection = new Lang.Class({
         let world = GWeather.Location.get_world();
         let clocks = settings.get_value('world-clocks').deep_unpack();
         for (let i = 0; i < clocks.length; i++) {
+            if (!clocks[i].location)
+                continue;
             let l = world.deserialize(clocks[i].location);
-            this._locations.push({ location: l });
+            if (l)
+                this._locations.push({ location: l });
         }
 
         this._locations.sort(function(a, b) {
