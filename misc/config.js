@@ -3,7 +3,7 @@
 /* The name of this package (not localized) */
 var PACKAGE_NAME = 'gnome-shell';
 /* The version of this package */
-var PACKAGE_VERSION = '3.26.2';
+var PACKAGE_VERSION = '3.27.92';
 /* 1 if gnome-bluetooth is available, 0 otherwise */
 var HAVE_BLUETOOTH = 1;
 /* 1 if networkmanager is available, 0 otherwise */
@@ -16,4 +16,4 @@ var LOCALEDIR = '/usr/share/locale';
 var LIBEXECDIR = '/usr/lib/gnome-shell';
 var VPNDIR = '/usr/lib/NetworkManager/VPN';
 /* g-i package versions */
-var LIBMUTTER_API_VERSION = '1'
+var LIBMUTTER_API_VERSION = '2'
