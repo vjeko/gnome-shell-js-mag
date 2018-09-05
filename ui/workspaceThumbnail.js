@@ -31,7 +31,7 @@ var WORKSPACE_CUT_SIZE = 10;
 
 var WORKSPACE_KEEP_ALIVE_TIME = 100;
 
-const OVERRIDE_SCHEMA = 'org.gnome.shell.overrides';
+var OVERRIDE_SCHEMA = 'org.gnome.shell.overrides';
 
 /* A layout manager that requests size only for primary_actor, but then allocates
    all using a fixed layout */
@@ -70,12 +70,7 @@ var WindowClone = new Lang.Class({
 
         this.clone._updateId = this.metaWindow.connect('position-changed',
                                                        this._onPositionChanged.bind(this));
-        this.clone._destroyId = this.realWindow.connect('destroy', () => {
-            // First destroy the clone and then destroy everything
-            // This will ensure that we never see it in the _disconnectSignals loop
-            this.clone.destroy();
-            this.destroy();
-        });
+        this.clone._destroyId = this.realWindow.connect('destroy', this.destroy.bind(this));
         this._onPositionChanged();
 
         this.actor.connect('button-release-event',
@@ -142,6 +137,12 @@ var WindowClone = new Lang.Class({
     },
 
     destroy() {
+        // First destroy the clone and then destroy everything
+        // This will ensure that we never see it in the _disconnectSignals loop
+        this.metaWindow.disconnect(this.clone._updateId);
+        this.realWindow.disconnect(this.clone._destroyId);
+        this.clone.destroy();
+
         this.actor.destroy();
     },
 
@@ -241,7 +242,7 @@ var WindowClone = new Lang.Class({
 Signals.addSignalMethods(WindowClone.prototype);
 
 
-const ThumbnailState = {
+var ThumbnailState = {
     NEW   :         0,
     ANIMATING_IN :  1,
     NORMAL:         2,
@@ -275,8 +276,8 @@ var WorkspaceThumbnail = new Lang.Class({
 
         this._createBackground();
 
-        let monitor = Main.layoutManager.primaryMonitor;
-        this.setPorthole(monitor.x, monitor.y, monitor.width, monitor.height);
+        let workArea = Main.layoutManager.getWorkAreaForMonitor(this.monitorIndex);
+        this.setPorthole(workArea.x, workArea.y, workArea.width, workArea.height);
 
         let windows = global.get_window_actors().filter(actor => {
             let win = actor.meta_window;
@@ -321,8 +322,6 @@ var WorkspaceThumbnail = new Lang.Class({
     },
 
     setPorthole(x, y, width, height) {
-        this._portholeX = x;
-        this._portholeY = y;
         this.actor.set_size(width, height);
         this._contents.set_position(-x, -y);
     },
@@ -374,18 +373,9 @@ var WorkspaceThumbnail = new Lang.Class({
     },
 
     _doRemoveWindow(metaWin) {
-        let win = metaWin.get_compositor_private();
-
-        // find the position of the window in our list
-        let index = this._lookupIndex (metaWin);
-
-        if (index == -1)
-            return;
-
-        let clone = this._windows[index];
-        this._windows.splice(index, 1);
-
-        clone.destroy();
+        let clone = this._removeWindowClone(metaWin);
+        if (clone)
+            clone.destroy();
     },
 
     _doAddWindow(metaWin) {
@@ -537,6 +527,9 @@ var WorkspaceThumbnail = new Lang.Class({
         clone.connect('drag-end', () => {
             Main.overview.endWindowDrag(clone.metaWindow);
         });
+        clone.actor.connect('destroy', () => {
+            this._removeWindowClone(clone.metaWindow);
+        });
         this._contents.add_actor(clone.actor);
 
         if (this._windows.length == 0)
@@ -547,6 +540,16 @@ var WorkspaceThumbnail = new Lang.Class({
         this._windows.push(clone);
 
         return clone;
+    },
+
+    _removeWindowClone(metaWin) {
+        // find the position of the window in our list
+        let index = this._lookupIndex (metaWin);
+
+        if (index == -1)
+            return null;
+
+        return this._windows.splice(index, 1).pop();
     },
 
     activate(time) {
@@ -675,11 +678,7 @@ var ThumbnailsBox = new Lang.Class({
         this._settings.connect('changed::dynamic-workspaces',
             this._updateSwitcherVisibility.bind(this));
 
-        Main.layoutManager.connect('monitors-changed', () => {
-            this._destroyThumbnails();
-            if (Main.overview.visible)
-                this._createThumbnails();
-        });
+        Main.layoutManager.connect('monitors-changed', this._rebuildThumbnails.bind(this));
     },
 
     _updateSwitcherVisibility() {
@@ -872,6 +871,9 @@ var ThumbnailsBox = new Lang.Class({
             Main.overview.connect('windows-restacked',
                                   this._syncStacking.bind(this));
 
+        this._workareasChangedId =
+            global.screen.connect('workareas-changed', this._rebuildThumbnails.bind(this));
+
         this._targetScale = 0;
         this._scale = 0;
         this._pendingScaleUpdate = false;
@@ -901,10 +903,22 @@ var ThumbnailsBox = new Lang.Class({
             this._syncStackingId = 0;
         }
 
+        if (this._workareasChangedId > 0) {
+            global.screen.disconnect(this._workareasChangedId);
+            this._workareasChangedId = 0;
+        }
+
         for (let w = 0; w < this._thumbnails.length; w++)
             this._thumbnails[w].destroy();
         this._thumbnails = [];
         this._porthole = null;
+    },
+
+    _rebuildThumbnails() {
+        this._destroyThumbnails();
+
+        if (Main.overview.visible)
+            this._createThumbnails();
     },
 
     _workspacesChanged() {
@@ -1159,7 +1173,7 @@ var ThumbnailsBox = new Lang.Class({
     // The "porthole" is the portion of the screen that we show in the
     // workspaces
     _ensurePorthole() {
-        if (!Main.layoutManager.primaryMonitor)
+        if (!Main.layoutManager.primaryMonitor || !Main.overview.visible)
             return false;
 
         if (!this._porthole)

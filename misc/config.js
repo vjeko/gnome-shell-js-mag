@@ -3,7 +3,7 @@
 /* The name of this package (not localized) */
 var PACKAGE_NAME = 'gnome-shell';
 /* The version of this package */
-var PACKAGE_VERSION = '3.27.92';
+var PACKAGE_VERSION = '3.28.3';
 /* 1 if gnome-bluetooth is available, 0 otherwise */
 var HAVE_BLUETOOTH = 1;
 /* 1 if networkmanager is available, 0 otherwise */
