@@ -124,7 +124,7 @@ const Magnifier = new Lang.Class({
         }
 
         // Create small clutter tree for the magnified mouse.
-        let cursorTracker = Meta.CursorTracker.get_for_screen(global.screen);
+        let cursorTracker = Meta.CursorTracker.get_for_display(global.display);
         this._mouseSprite = new Clutter.Texture();
         Shell.util_cursor_tracker_to_clutter(cursorTracker, this._mouseSprite);
         this._cursorRoot = new Clutter.Actor();
