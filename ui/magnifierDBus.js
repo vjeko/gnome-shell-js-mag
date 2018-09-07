@@ -9,101 +9,103 @@ const ZOOM_SERVICE_PATH = '/org/gnome/Magnifier/ZoomRegion';
 
 // Subset of gnome-mag's Magnifier dbus interface -- to be expanded.  See:
 // http://git.gnome.org/browse/gnome-mag/tree/xml/...Magnifier.xml
-const MagnifierIface = '<node> \
-<interface name="org.gnome.Magnifier"> \
-<method name="setActive"> \
-    <arg type="b" direction="in" /> \
-</method> \
-<method name="isActive"> \
-    <arg type="b" direction="out" /> \
-</method> \
-<method name="showCursor" /> \
-<method name="hideCursor" /> \
-<method name="zoomIn" /> \
-<method name="zoomOut" /> \
-<method name="createZoomRegion"> \
-    <arg type="d" direction="in" /> \
-    <arg type="d" direction="in" /> \
-    <arg type="ai" direction="in" /> \
-    <arg type="ai" direction="in" /> \
-    <arg type="o" direction="out" /> \
-</method> \
-<method name="addZoomRegion"> \
-    <arg type="o" direction="in" /> \
-    <arg type="b" direction="out" /> \
-</method> \
-<method name="getZoomRegions"> \
-    <arg type="ao" direction="out" /> \
-</method> \
-<method name="clearAllZoomRegions" /> \
-<method name="fullScreenCapable"> \
-    <arg type="b" direction="out" /> \
-</method> \
-<method name="setCrosswireSize"> \
-    <arg type="i" direction="in" /> \
-</method> \
-<method name="getCrosswireSize"> \
-    <arg type="i" direction="out" /> \
-</method> \
-<method name="setCrosswireLength"> \
-    <arg type="i" direction="in" /> \
-</method> \
-<method name="getCrosswireLength"> \
-    <arg type="i" direction="out" /> \
-</method> \
-<method name="setCrosswireClip"> \
-    <arg type="b" direction="in" /> \
-</method> \
-<method name="getCrosswireClip"> \
-    <arg type="b" direction="out" /> \
-</method> \
-<method name="setCrosswireColor"> \
-    <arg type="u" direction="in" /> \
-</method> \
-<method name="getCrosswireColor"> \
-    <arg type="u" direction="out" /> \
-</method> \
-</interface> \
-</node>';
+const MagnifierIface = `
+<node>
+<interface name="org.gnome.Magnifier">
+<method name="setActive">
+    <arg type="b" direction="in" />
+</method>
+<method name="isActive">
+    <arg type="b" direction="out" />
+</method>
+<method name="showCursor" />
+<method name="hideCursor" />
+<method name="zoomIn" /> 
+<method name="zoomOut" /> 
+<method name="createZoomRegion">
+    <arg type="d" direction="in" />
+    <arg type="d" direction="in" />
+    <arg type="ai" direction="in" />
+    <arg type="ai" direction="in" />
+    <arg type="o" direction="out" />
+</method>
+<method name="addZoomRegion">
+    <arg type="o" direction="in" />
+    <arg type="b" direction="out" />
+</method>
+<method name="getZoomRegions">
+    <arg type="ao" direction="out" />
+</method>
+<method name="clearAllZoomRegions" />
+<method name="fullScreenCapable">
+    <arg type="b" direction="out" />
+</method>
+<method name="setCrosswireSize">
+    <arg type="i" direction="in" />
+</method>
+<method name="getCrosswireSize">
+    <arg type="i" direction="out" />
+</method>
+<method name="setCrosswireLength">
+    <arg type="i" direction="in" />
+</method>
+<method name="getCrosswireLength">
+    <arg type="i" direction="out" />
+</method>
+<method name="setCrosswireClip">
+    <arg type="b" direction="in" />
+</method>
+<method name="getCrosswireClip">
+    <arg type="b" direction="out" />
+</method>
+<method name="setCrosswireColor">
+    <arg type="u" direction="in" />
+</method>
+<method name="getCrosswireColor">
+    <arg type="u" direction="out" />
+</method>
+</interface>
+</node>`;
 
 // Subset of gnome-mag's ZoomRegion dbus interface -- to be expanded.  See:
 // http://git.gnome.org/browse/gnome-mag/tree/xml/...ZoomRegion.xml
-const ZoomRegionIface = '<node> \
-<interface name="org.gnome.Magnifier.ZoomRegion"> \
-<method name="setMagFactor"> \
-    <arg type="d" direction="in" /> \
-    <arg type="d" direction="in" /> \
-</method> \
-<method name="getMagFactor"> \
-    <arg type="d" direction="out" /> \
-    <arg type="d" direction="out" /> \
-</method> \
-<method name="setRoi"> \
-    <arg type="ai" direction="in" /> \
-</method> \
-<method name="getRoi"> \
-    <arg type="ai" direction="out" /> \
-</method> \
-<method name="shiftContentsTo"> \
-    <arg type="i" direction="in" /> \
-    <arg type="i" direction="in" /> \
-    <arg type="b" direction="out" /> \
-</method> \
-<method name="moveResize"> \
-    <arg type="ai" direction="in" /> \
-</method> \
-</interface> \
-</node>';
+const ZoomRegionIface = `
+<node>
+<interface name="org.gnome.Magnifier.ZoomRegion">
+<method name="setMagFactor">
+    <arg type="d" direction="in" />
+    <arg type="d" direction="in" />
+</method>
+<method name="getMagFactor">
+    <arg type="d" direction="out" />
+    <arg type="d" direction="out" />
+</method>
+<method name="setRoi">
+    <arg type="ai" direction="in" />
+</method>
+<method name="getRoi">
+    <arg type="ai" direction="out" />
+</method>
+<method name="shiftContentsTo">
+    <arg type="i" direction="in" />
+    <arg type="i" direction="in" />
+    <arg type="b" direction="out" />
+</method>
+<method name="moveResize">
+    <arg type="ai" direction="in" />
+</method>
+</interface>
+</node>`;
 
 // For making unique ZoomRegion DBus proxy object paths of the form:
 // '/org/gnome/Magnifier/ZoomRegion/zoomer0',
 // '/org/gnome/Magnifier/ZoomRegion/zoomer1', etc.
 let _zoomRegionInstanceCount = 0;
 
-const ShellMagnifier = new Lang.Class({
+var ShellMagnifier = new Lang.Class({
     Name: 'ShellMagnifier',
 
-    _init: function() {
+    _init() {
         this._zoomers = {};
 
         this._dbusImpl = Gio.DBusExportedObject.wrapJSObject(MagnifierIface, this);
@@ -114,7 +116,7 @@ const ShellMagnifier = new Lang.Class({
      * setActive:
      * @activate:   Boolean to activate or de-activate the magnifier.
      */
-    setActive: function(activate) {
+    setActive(activate) {
         Main.magnifier.setActive(activate);
     },
 
@@ -122,7 +124,7 @@ const ShellMagnifier = new Lang.Class({
      * isActive:
      * @return  Whether the magnifier is active (boolean).
      */
-    isActive: function() {
+    isActive() {
         return Main.magnifier.isActive();
     },
 
@@ -130,25 +132,24 @@ const ShellMagnifier = new Lang.Class({
      * showCursor:
      * Show the system mouse pointer.
      */
-    showCursor: function() {
+    showCursor() {
         Main.magnifier.showSystemCursor();
     },
-
-    zoomIn: function() {
-        Main.magnifier.zoomIn();
-    },
-
-    zoomOut: function() {
-        Main.magnifier.zoomOut();
-    },
-
 
     /**
      * hideCursor:
      * Hide the system mouse pointer.
      */
-    hideCursor: function() {
+    hideCursor() {
         Main.magnifier.hideSystemCursor();
+    },
+
+    zoomIn() {
+        Main.magnifier.zoomIn();
+    },
+
+    zoomOut() {
+        Main.magnifier.zoomOut();
     },
 
     /**
@@ -171,7 +172,7 @@ const ShellMagnifier = new Lang.Class({
      *
      * @return          The newly created ZoomRegion.
      */
-    createZoomRegion: function(xMagFactor, yMagFactor, roi, viewPort) {
+    createZoomRegion(xMagFactor, yMagFactor, roi, viewPort) {
         let ROI = { x: roi[0], y: roi[1], width: roi[2] - roi[0], height: roi[3] - roi[1] };
         let viewBox = { x: viewPort[0], y: viewPort[1], width: viewPort[2] - viewPort[0], height: viewPort[3] - viewPort[1] };
         let realZoomRegion = Main.magnifier.createZoomRegion(xMagFactor, yMagFactor, ROI, viewBox);
@@ -191,7 +192,7 @@ const ShellMagnifier = new Lang.Class({
      * Append the given ZoomRegion to the magnifier's list of ZoomRegions.
      * @zoomerObjectPath:   The object path for the zoom region proxy.
      */
-    addZoomRegion: function(zoomerObjectPath) {
+    addZoomRegion(zoomerObjectPath) {
         let proxyAndZoomRegion = this._zoomers[zoomerObjectPath];
         if (proxyAndZoomRegion && proxyAndZoomRegion.zoomRegion) {
             Main.magnifier.addZoomRegion(proxyAndZoomRegion.zoomRegion);
@@ -207,14 +208,14 @@ const ShellMagnifier = new Lang.Class({
      * @return:     The Magnifier's zoom region list as an array of DBus object
      *              paths.
      */
-    getZoomRegions: function() {
+    getZoomRegions() {
         // There may be more ZoomRegions in the magnifier itself than have
         // been added through dbus.  Make sure all of them are associated with
         // an object path and proxy.
         let zoomRegions = Main.magnifier.getZoomRegions();
         let objectPaths = [];
         let thoseZoomers = this._zoomers;
-        zoomRegions.forEach (function(aZoomRegion, index, array) {
+        zoomRegions.forEach ((aZoomRegion, index, array) => {
             let found = false;
             for (let objectPath in thoseZoomers) {
                 let proxyAndZoomRegion = thoseZoomers[objectPath];
@@ -243,7 +244,7 @@ const ShellMagnifier = new Lang.Class({
      * clearAllZoomRegions:
      * Remove all the zoom regions from this Magnfier's ZoomRegion list.
      */
-    clearAllZoomRegions: function() {
+    clearAllZoomRegions() {
         Main.magnifier.clearAllZoomRegions();
         for (let objectPath in this._zoomers) {
             let proxyAndZoomer = this._zoomers[objectPath];
@@ -260,7 +261,7 @@ const ShellMagnifier = new Lang.Class({
      * Consult if the Magnifier can magnify in full-screen mode.
      * @return  Always return true.
      */
-    fullScreenCapable: function() {
+    fullScreenCapable() {
         return true;
     },
 
@@ -269,7 +270,7 @@ const ShellMagnifier = new Lang.Class({
      * Set the crosswire size of all ZoomRegions.
      * @size:   The thickness of each line in the cross wire.
      */
-     setCrosswireSize: function(size) {
+     setCrosswireSize(size) {
         Main.magnifier.setCrosshairsThickness(size);
      },
 
@@ -278,7 +279,7 @@ const ShellMagnifier = new Lang.Class({
      * Get the crosswire size of all ZoomRegions.
      * @return:   The thickness of each line in the cross wire.
      */
-     getCrosswireSize: function() {
+     getCrosswireSize() {
         return Main.magnifier.getCrosshairsThickness();
      },
 
@@ -287,7 +288,7 @@ const ShellMagnifier = new Lang.Class({
      * Set the crosswire length of all zoom-regions..
      * @size:   The length of each line in the cross wire.
      */
-     setCrosswireLength: function(length) {
+     setCrosswireLength(length) {
         Main.magnifier.setCrosshairsLength(length);
      },
 
@@ -296,7 +297,7 @@ const ShellMagnifier = new Lang.Class({
      * Set the crosswire size of all zoom-regions.
      * @size:   The thickness of each line in the cross wire.
      */
-     getCrosswireLength: function() {
+     getCrosswireLength() {
         return Main.magnifier.getCrosshairsLength();
      },
 
@@ -305,7 +306,7 @@ const ShellMagnifier = new Lang.Class({
      * Set if the crosswire will be clipped by the cursor image..
      * @clip:   Flag to indicate whether to clip the crosswire.
      */
-     setCrosswireClip: function(clip) {
+     setCrosswireClip(clip) {
         Main.magnifier.setCrosshairsClip(clip);
      },
 
@@ -314,7 +315,7 @@ const ShellMagnifier = new Lang.Class({
      * Get the crosswire clip value.
      * @return:   Whether the crosswire is clipped by the cursor image.
      */
-     getCrosswireClip: function() {
+     getCrosswireClip() {
         return Main.magnifier.getCrosshairsClip();
      },
 
@@ -323,7 +324,7 @@ const ShellMagnifier = new Lang.Class({
      * Set the crosswire color of all ZoomRegions.
      * @color:   Unsigned int of the form rrggbbaa.
      */
-     setCrosswireColor: function(color) {
+     setCrosswireColor(color) {
         Main.magnifier.setCrosshairsColor('#%08x'.format(color));
      },
 
@@ -332,7 +333,7 @@ const ShellMagnifier = new Lang.Class({
      * Get the crosswire color of all ZoomRegions.
      * @return:   The crosswire color as an unsigned int in the form rrggbbaa.
      */
-     getCrosswireColor: function() {
+     getCrosswireColor() {
         let colorString = Main.magnifier.getCrosshairsColor();
         // Drop the leading '#'.
         return parseInt(colorString.slice(1), 16);
@@ -345,10 +346,10 @@ const ShellMagnifier = new Lang.Class({
  * @zoomerObjectPath:   String that is the path to a DBus ZoomRegion.
  * @zoomRegion:         The actual zoom region associated with the object path.
  */
-const ShellMagnifierZoomRegion = new Lang.Class({
+var ShellMagnifierZoomRegion = new Lang.Class({
     Name: 'ShellMagnifierZoomRegion',
 
-    _init: function(zoomerObjectPath, zoomRegion) {
+    _init(zoomerObjectPath, zoomRegion) {
         this._zoomRegion = zoomRegion;
 
         this._dbusImpl = Gio.DBusExportedObject.wrapJSObject(ZoomRegionIface, this);
@@ -363,7 +364,7 @@ const ShellMagnifierZoomRegion = new Lang.Class({
      * @yMagFactor:     The power to set the vertical magnification factor to
      *                  of the magnified view.
      */
-    setMagFactor: function(xMagFactor, yMagFactor) {
+    setMagFactor(xMagFactor, yMagFactor) {
         this._zoomRegion.setMagFactor(xMagFactor, yMagFactor);
     },
 
@@ -374,7 +375,7 @@ const ShellMagnifierZoomRegion = new Lang.Class({
      *          magnification.  A value of 2.0 means the contents are doubled
      *          in size, and so on.
      */
-    getMagFactor: function() {
+    getMagFactor() {
         return this._zoomRegion.getMagFactor();
     },
 
@@ -385,7 +386,7 @@ const ShellMagnifierZoomRegion = new Lang.Class({
      *          screen to magnify. The values are in screen (unmagnified)
      *          coordinate space.
      */
-    setRoi: function(roi) {
+    setRoi(roi) {
         let roiObject = { x: roi[0], y: roi[1], width: roi[2] - roi[0], height: roi[3] - roi[1] };
         this._zoomRegion.setROI(roiObject);
     },
@@ -398,7 +399,7 @@ const ShellMagnifierZoomRegion = new Lang.Class({
      * @return  an array, [left, top, right, bottom], representing the bounding
      *          rectangle of what is shown in the magnified view.
      */
-    getRoi: function() {
+    getRoi() {
         let roi = this._zoomRegion.getROI();
         roi[2] += roi[0];
         roi[3] += roi[1];
@@ -413,7 +414,7 @@ const ShellMagnifierZoomRegion = new Lang.Class({
      * @return  Whether the shift was successful (for GS-mag, this is always
      *          true).
      */
-    shiftContentsTo: function(x, y) {
+    shiftContentsTo(x, y) {
         this._zoomRegion.scrollContentsTo(x, y);
         return true;
     },
@@ -424,12 +425,12 @@ const ShellMagnifierZoomRegion = new Lang.Class({
      * @viewPort    Array, [left, top, right, bottom], defining the position and
      *              size on screen to place the zoom region.
      */
-    moveResize: function(viewPort) {
+    moveResize(viewPort) {
         let viewRect = { x: viewPort[0], y: viewPort[1], width: viewPort[2] - viewPort[0], height: viewPort[3] - viewPort[1] };
         this._zoomRegion.setViewPort(viewRect);
     },
 
-    destroy: function() {
+    destroy() {
         this._dbusImpl.unexport();
     }
 });
