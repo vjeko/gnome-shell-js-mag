@@ -54,12 +54,73 @@ const CROSS_HAIRS_CLIP_KEY      = 'cross-hairs-clip';
 
 let magDBusService = null;
 
+const QuadTreeNode = new Lang.Class({
+    Name: "QuadTreeNode",
+
+    _init: function(x, y) {
+        this._x = x;
+        this._y = y;
+
+        this.children = [null, null, null, null];
+    }
+
+});
+
+const QuadTree = new Lang.Class({
+    Name: "QuadTree",
+
+    _init: function() {
+        this._root = null
+    },
+
+    _index: function([x1, y1,], [x2, y2]) {
+        return + (x1 > x2) * 2 + (y1 > y2);
+    },
+
+    find: function([x, y]) {
+        return this._find(this._root, [x, y]);
+    },
+
+    _find: function(node, [x, y]) {
+        if (!(node instanceof QuadTreeNode)) return node;
+
+        let idx = this._index([node._x, node._y], [x, y]);
+        return this._find(node.children[idx], [x, y]);
+    },
+
+    _insert: function(node, newNode) {
+        if (node == null || !(node instanceof QuadTreeNode))  return newNode;
+
+        let idx = this._index([node._x, node._y], [newNode._x, newNode._y]);
+        node.children[idx] = this._insert(node.children[idx], newNode);
+
+        return node;
+    },
+
+    insert: function([x, y], [width, height], value) {
+        var topLeftNode = new QuadTreeNode(x, y);
+        this._root = this._insert(this._root, topLeftNode);
+        topLeftNode.children[0] = value;
+
+        var bottomRightNode = new QuadTreeNode(x + width, y + height);
+        this._root = this._insert(this._root, bottomRightNode);
+        bottomRightNode.children[3] = value;
+    }
+
+});
+
 var Magnifier = new Lang.Class({
     Name: 'Magnifier',
 
     _init() {
         // Magnifier is a manager of ZoomRegions.
         this._zoomRegions = [];
+        this._tree = new QuadTree();
+
+        for (let i = 0; i < Main.layoutManager.monitors.length; i++) {
+            let m = Main.layoutManager.monitors[i];
+            this._tree.insert([m.x, m.y], [m.width, m.height], i);
+        }
 
         // Create small clutter tree for the magnified mouse.
         let cursorTracker = Meta.CursorTracker.get_for_display(global.display);
@@ -74,17 +135,20 @@ var Magnifier = new Lang.Class({
         let mask;
         [this.xMouse, this.yMouse, mask] = global.get_pointer();
 
-        let aZoomRegion = new ZoomRegion(this, this._cursorRoot);
-        this._zoomRegions.push(aZoomRegion);
-        let showAtLaunch = this._settingsInit(aZoomRegion);
-        aZoomRegion.scrollContentsTo(this.xMouse, this.yMouse);
+        for (let i = 0; i < Main.layoutManager.monitors.length; i++) {
+            let m = Main.layoutManager.monitors[i];
+            let aZoomRegion = new ZoomRegion(this, this._cursorRoot, m.x, m.y, m.width, m.height);
+            log(aZoomRegion);
+            this._zoomRegions.push(aZoomRegion);
+            let showAtLaunch = this._settingsInit(aZoomRegion);
+        }
 
         cursorTracker.connect('cursor-changed', this._updateMouseSprite.bind(this));
         this._cursorTracker = cursorTracker;
 
         // Export to dbus.
         magDBusService = new MagnifierDBus.ShellMagnifier();
-        this.setActive(showAtLaunch);
+        this.setActive(true);
     },
 
     /**
@@ -104,15 +168,26 @@ var Magnifier = new Lang.Class({
     },
 
     zoomStep(step) {
-        let region = this._zoomRegions[0];
+        let [xMouse, yMouse, mask] = global.get_pointer();
+        let idx = this._tree.find([xMouse, yMouse]);
+        let region = this._zoomRegions[idx];
+
+        if (region._xMagFactor + step < 1) return;
+
         region.setMagFactor(region._xMagFactor + step, region._yMagFactor + step);
+
+        let sysMouseOverAny = false;
+        if (region.scrollToMousePos())
+            sysMouseOverAny = true;
     },
 
     zoomOut() {
+        log("zoomin");
         this.zoomStep(-ZOOM_STEP);
     },
 
     zoomIn() {
+        log("zoomin");
         this.zoomStep(ZOOM_STEP);
     },
 
@@ -203,11 +278,12 @@ var Magnifier = new Lang.Class({
             this.xMouse = xMouse;
             this.yMouse = yMouse;
 
+            let monitorIdx = this._tree.find([xMouse, yMouse]);
+
             let sysMouseOverAny = false;
-            this._zoomRegions.forEach((zoomRegion, index, array) => {
-                if (zoomRegion.scrollToMousePos())
-                    sysMouseOverAny = true;
-            });
+            if (this._zoomRegions[monitorIdx].scrollToMousePos())
+                sysMouseOverAny = true;
+
             if (sysMouseOverAny)
                 this.hideSystemCursor();
             else
@@ -683,7 +759,11 @@ Signals.addSignalMethods(Magnifier.prototype);
 var ZoomRegion = new Lang.Class({
     Name: 'ZoomRegion',
 
-    _init(magnifier, mouseSourceActor) {
+    _init: function(magnifier, mouseSourceActor, x, y, width, height) {
+        log("x " + x);
+        log("y " + y);
+        log("width " + width);
+        log("height " + height);
         this._magnifier = magnifier;
         this._focusCaretTracker = new FocusCaretTracker.FocusCaretTracker();
 
@@ -706,10 +786,10 @@ var ZoomRegion = new Lang.Class({
         this._crossHairs = null;
         this._crossHairsActor = null;
 
-        this._viewPortX = 0;
-        this._viewPortY = 0;
-        this._viewPortWidth = global.screen_width;
-        this._viewPortHeight = global.screen_height;
+        this._viewPortX = x;
+        this._viewPortY = y;
+        this._viewPortWidth = width;
+        this._viewPortHeight = height;
         this._xCenter = this._viewPortWidth / 2;
         this._yCenter = this._viewPortHeight / 2;
         this._xMagFactor = 1;
@@ -914,13 +994,31 @@ var ZoomRegion = new Lang.Class({
      * @return  an array, [x, y, width, height], representing the bounding
      *          rectangle of what is shown in the magnified view.
      */
-    getROI() {
-        let roiWidth = this._viewPortWidth / this._xMagFactor;
-        let roiHeight = this._viewPortHeight / this._yMagFactor;
+    getROI(xFactor, yFactor, width, height) {
+        let roiWidth = width / xFactor;
+        let roiHeight = height / yFactor;
+
+        let [xMouse, yMouse, mask] = global.get_pointer();
+        let [xCenter, yCenter] = this._clip(
+            xMouse, yMouse, xFactor, yFactor, width, height);
 
         return [this._xCenter - roiWidth / 2,
-                this._yCenter - roiHeight / 2,
-                roiWidth, roiHeight];
+            this._yCenter - roiHeight / 2,
+            roiWidth, roiHeight];
+    },
+
+    _clip(xCenter, yCenter, xFactor, yFactor, width, height) {
+        if (this._clampScrollingAtEdges) {
+            let roiWidth = width / xFactor;
+            let roiHeight = height / yFactor;
+
+            xCenter = Math.min(xCenter, this._viewPortX + width - roiWidth / 2);
+            xCenter = Math.max(xCenter, this._viewPortX + roiWidth / 2);
+            yCenter = Math.min(yCenter, this._viewPortY + height - roiHeight / 2);
+            yCenter = Math.max(yCenter, this._viewPortY + roiHeight / 2);
+        }
+
+        return [xCenter, yCenter];
     },
 
     /**
@@ -1284,18 +1382,13 @@ var ZoomRegion = new Lang.Class({
     _setViewPort(viewPort, fromROIUpdate) {
         // Sets the position of the zoom region on the screen
 
-        let width = Math.round(Math.min(viewPort.width, global.screen_width));
-        let height = Math.round(Math.min(viewPort.height, global.screen_height));
+        let width = Math.round(Math.min(viewPort.width, this._viewPortWidth));
+        let height = Math.round(Math.min(viewPort.height, this._viewPortHeight));
         let x = Math.max(viewPort.x, 0);
         let y = Math.max(viewPort.y, 0);
 
-        x = Math.round(Math.min(x, global.screen_width - width));
-        y = Math.round(Math.min(y, global.screen_height - height));
-
-        this._viewPortX = x;
-        this._viewPortY = y;
-        this._viewPortWidth = width;
-        this._viewPortHeight = height;
+        x = Math.round(Math.min(x, this._viewPortWidth - width));
+        y = Math.round(Math.min(y, this._viewPortHeight - height));
 
         this._updateMagViewGeometry();
 
@@ -1386,7 +1479,7 @@ var ZoomRegion = new Lang.Class({
         return true;
     },
 
-    _centerFromMousePosition() {
+    _centerFromMousePosition(xFactor, yFactor, width, height) {
         // Determines where the center should be given the current cursor
         // position and mouse tracking mode
 
@@ -1394,7 +1487,7 @@ var ZoomRegion = new Lang.Class({
         let yMouse = this._magnifier.yMouse;
 
         if (this._mouseTrackingMode == GDesktopEnums.MagnifierMouseTrackingMode.PROPORTIONAL) {
-            return this._centerFromPointProportional(xMouse, yMouse);
+            return this._centerFromPointProportional(xMouse, yMouse, xFactor, yFactor, width, height);
         }
         else if (this._mouseTrackingMode == GDesktopEnums.MagnifierMouseTrackingMode.PUSH) {
             return this._centerFromPointPush(xMouse, yMouse);
@@ -1406,12 +1499,12 @@ var ZoomRegion = new Lang.Class({
         return null; // Should never be hit
     },
 
-    _centerFromCaretPosition() {
+    _centerFromCaretPosition(xFactor, yFactor, width, height) {
         let xCaret = this._xCaret;
         let yCaret = this._yCaret;
 
         if (this._caretTrackingMode == GDesktopEnums.MagnifierCaretTrackingMode.PROPORTIONAL)
-            [xCaret, yCaret] = this._centerFromPointProportional(xCaret, yCaret);
+            return this._centerFromPointProportional(xMouse, yMouse, xFactor, yFactor, width, height);
         else if (this._caretTrackingMode == GDesktopEnums.MagnifierCaretTrackingMode.PUSH)
             [xCaret, yCaret] = this._centerFromPointPush(xCaret, yCaret);
         else if (this._caretTrackingMode == GDesktopEnums.MagnifierCaretTrackingMode.CENTERED)
@@ -1420,12 +1513,12 @@ var ZoomRegion = new Lang.Class({
         this._scrollContentsToDelayed(xCaret, yCaret);
     },
 
-    _centerFromFocusPosition() {
+    _centerFromFocusPosition(xFactor, yFactor, width, height) {
         let xFocus = this._xFocus;
         let yFocus = this._yFocus;
 
         if (this._focusTrackingMode == GDesktopEnums.MagnifierFocusTrackingMode.PROPORTIONAL)
-            [xFocus, yFocus] = this._centerFromPointProportional(xFocus, yFocus);
+            return this._centerFromPointProportional(xMouse, yMouse, xFactor, yFactor, width, height);
         else if (this._focusTrackingMode == GDesktopEnums.MagnifierFocusTrackingMode.PUSH)
             [xFocus, yFocus] = this._centerFromPointPush(xFocus, yFocus);
         else if (this._focusTrackingMode == GDesktopEnums.MagnifierFocusTrackingMode.CENTERED)
@@ -1455,8 +1548,8 @@ var ZoomRegion = new Lang.Class({
         return [xPos, yPos];
     },
 
-    _centerFromPointProportional(xPoint, yPoint) {
-        let [xRoi, yRoi, widthRoi, heightRoi] = this.getROI();
+    _centerFromPointProportional(xPoint, yPoint, xFactor, yFactor, width, height) {
+        let [xRoi, yRoi, widthRoi, heightRoi] = this.getROI(xFactor, yFactor, width, height);
         let halfScreenWidth = global.screen_width / 2;
         let halfScreenHeight = global.screen_height / 2;
         // We want to pad with a constant distance after zooming, so divide
@@ -1476,11 +1569,16 @@ var ZoomRegion = new Lang.Class({
         return [xPoint, yPoint];
     },
 
-    _screenToViewPort(screenX, screenY) {
+    _screenToViewPort: function(screenX, screenY, [xMouse, yMouse],
+                                xFactor, yFactor, width, height) {
+
+        let [xCenter, yCenter] = this._clip(
+            xMouse, yMouse, xFactor, yFactor, width, height);
+
         // Converts coordinates relative to the (unmagnified) screen to coordinates
         // relative to the origin of this._magView
-        return [this._viewPortWidth / 2 + (screenX - this._xCenter) * this._xMagFactor,
-                this._viewPortHeight / 2 + (screenY - this._yCenter) * this._yMagFactor];
+        return [width / 2 + (screenX - xCenter) * xFactor,
+            height / 2 + (screenY - yCenter) * yFactor];
     },
 
     _updateMagViewGeometry() {
@@ -1503,7 +1601,13 @@ var ZoomRegion = new Lang.Class({
         this._uiGroupClone.set_scale(this._xMagFactor, this._yMagFactor);
         this._mouseActor.set_scale(this._xMagFactor, this._yMagFactor);
 
-        let [x, y] = this._screenToViewPort(0, 0);
+        let [mx, my] = this._centerFromMousePosition(
+            this._xMagFactor, this._yMagFactor,
+            this._viewPortWidth, this._viewPortHeight);
+
+        let [x, y] = this._screenToViewPort(0, 0, [mx, my],
+            this._xMagFactor, this._yMagFactor,
+            this._viewPortWidth, this._viewPortHeight);
         this._uiGroupClone.set_position(Math.round(x), Math.round(y));
 
         this._updateMousePosition();
@@ -1513,8 +1617,15 @@ var ZoomRegion = new Lang.Class({
         if (!this.isActive())
             return;
 
+        let [mx, my] = this._centerFromMousePosition(
+            this._xMagFactor, this._yMagFactor,
+            this._viewPortWidth, this._viewPortHeight);
+
         let [xMagMouse, yMagMouse] = this._screenToViewPort(this._magnifier.xMouse,
-                                                            this._magnifier.yMouse);
+                                                            this._magnifier.yMouse,
+            [mx, my],
+            this._xMagFactor, this._yMagFactor,
+            this._viewPortWidth, this._viewPortHeight);
 
         xMagMouse = Math.round(xMagMouse);
         yMagMouse = Math.round(yMagMouse);
