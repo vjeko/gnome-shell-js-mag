@@ -1,116 +1,34 @@
 // -*- mode: js; js-indent-level: 4; indent-tabs-mode: nil -*-
+/* exported ShellMagnifier */
 
 const Gio = imports.gi.Gio;
-const Lang = imports.lang;
 const Main = imports.ui.main;
+
+const { loadInterfaceXML } = imports.misc.fileUtils;
 
 const MAG_SERVICE_PATH = '/org/gnome/Magnifier';
 const ZOOM_SERVICE_PATH = '/org/gnome/Magnifier/ZoomRegion';
 
 // Subset of gnome-mag's Magnifier dbus interface -- to be expanded.  See:
 // http://git.gnome.org/browse/gnome-mag/tree/xml/...Magnifier.xml
-const MagnifierIface = `
-<node>
-<interface name="org.gnome.Magnifier">
-<method name="setActive">
-    <arg type="b" direction="in" />
-</method>
-<method name="isActive">
-    <arg type="b" direction="out" />
-</method>
-<method name="showCursor" />
-<method name="hideCursor" />
-<method name="zoomIn" /> 
-<method name="zoomOut" /> 
-<method name="createZoomRegion">
-    <arg type="d" direction="in" />
-    <arg type="d" direction="in" />
-    <arg type="ai" direction="in" />
-    <arg type="ai" direction="in" />
-    <arg type="o" direction="out" />
-</method>
-<method name="addZoomRegion">
-    <arg type="o" direction="in" />
-    <arg type="b" direction="out" />
-</method>
-<method name="getZoomRegions">
-    <arg type="ao" direction="out" />
-</method>
-<method name="clearAllZoomRegions" />
-<method name="fullScreenCapable">
-    <arg type="b" direction="out" />
-</method>
-<method name="setCrosswireSize">
-    <arg type="i" direction="in" />
-</method>
-<method name="getCrosswireSize">
-    <arg type="i" direction="out" />
-</method>
-<method name="setCrosswireLength">
-    <arg type="i" direction="in" />
-</method>
-<method name="getCrosswireLength">
-    <arg type="i" direction="out" />
-</method>
-<method name="setCrosswireClip">
-    <arg type="b" direction="in" />
-</method>
-<method name="getCrosswireClip">
-    <arg type="b" direction="out" />
-</method>
-<method name="setCrosswireColor">
-    <arg type="u" direction="in" />
-</method>
-<method name="getCrosswireColor">
-    <arg type="u" direction="out" />
-</method>
-</interface>
-</node>`;
+const MagnifierIface = loadInterfaceXML('org.gnome.Magnifier');
 
 // Subset of gnome-mag's ZoomRegion dbus interface -- to be expanded.  See:
 // http://git.gnome.org/browse/gnome-mag/tree/xml/...ZoomRegion.xml
-const ZoomRegionIface = `
-<node>
-<interface name="org.gnome.Magnifier.ZoomRegion">
-<method name="setMagFactor">
-    <arg type="d" direction="in" />
-    <arg type="d" direction="in" />
-</method>
-<method name="getMagFactor">
-    <arg type="d" direction="out" />
-    <arg type="d" direction="out" />
-</method>
-<method name="setRoi">
-    <arg type="ai" direction="in" />
-</method>
-<method name="getRoi">
-    <arg type="ai" direction="out" />
-</method>
-<method name="shiftContentsTo">
-    <arg type="i" direction="in" />
-    <arg type="i" direction="in" />
-    <arg type="b" direction="out" />
-</method>
-<method name="moveResize">
-    <arg type="ai" direction="in" />
-</method>
-</interface>
-</node>`;
+const ZoomRegionIface = loadInterfaceXML('org.gnome.Magnifier.ZoomRegion');
 
 // For making unique ZoomRegion DBus proxy object paths of the form:
 // '/org/gnome/Magnifier/ZoomRegion/zoomer0',
 // '/org/gnome/Magnifier/ZoomRegion/zoomer1', etc.
 let _zoomRegionInstanceCount = 0;
 
-var ShellMagnifier = new Lang.Class({
-    Name: 'ShellMagnifier',
-
-    _init() {
+var ShellMagnifier = class ShellMagnifier {
+    constructor() {
         this._zoomers = {};
 
         this._dbusImpl = Gio.DBusExportedObject.wrapJSObject(MagnifierIface, this);
         this._dbusImpl.export(Gio.DBus.session, MAG_SERVICE_PATH);
-    },
+    }
 
     /**
      * setActive:
@@ -118,7 +36,7 @@ var ShellMagnifier = new Lang.Class({
      */
     setActive(activate) {
         Main.magnifier.setActive(activate);
-    },
+    }
 
     /**
      * isActive:
@@ -126,7 +44,7 @@ var ShellMagnifier = new Lang.Class({
      */
     isActive() {
         return Main.magnifier.isActive();
-    },
+    }
 
     /**
      * showCursor:
@@ -134,7 +52,7 @@ var ShellMagnifier = new Lang.Class({
      */
     showCursor() {
         Main.magnifier.showSystemCursor();
-    },
+    }
 
     /**
      * hideCursor:
@@ -142,15 +60,7 @@ var ShellMagnifier = new Lang.Class({
      */
     hideCursor() {
         Main.magnifier.hideSystemCursor();
-    },
-
-    zoomIn() {
-        Main.magnifier.zoomIn();
-    },
-
-    zoomOut() {
-        Main.magnifier.zoomOut();
-    },
+    }
 
     /**
      * createZoomRegion:
@@ -176,7 +86,7 @@ var ShellMagnifier = new Lang.Class({
         let ROI = { x: roi[0], y: roi[1], width: roi[2] - roi[0], height: roi[3] - roi[1] };
         let viewBox = { x: viewPort[0], y: viewPort[1], width: viewPort[2] - viewPort[0], height: viewPort[3] - viewPort[1] };
         let realZoomRegion = Main.magnifier.createZoomRegion(xMagFactor, yMagFactor, ROI, viewBox);
-        let objectPath = ZOOM_SERVICE_PATH + '/zoomer' + _zoomRegionInstanceCount;
+        let objectPath = `${ZOOM_SERVICE_PATH}/zoomer${_zoomRegionInstanceCount}`;
         _zoomRegionInstanceCount++;
 
         let zoomRegionProxy = new ShellMagnifierZoomRegion(objectPath, realZoomRegion);
@@ -185,7 +95,7 @@ var ShellMagnifier = new Lang.Class({
         proxyAndZoomRegion.zoomRegion = realZoomRegion;
         this._zoomers[objectPath] = proxyAndZoomRegion;
         return objectPath;
-    },
+    }
 
     /**
      * addZoomRegion:
@@ -197,10 +107,10 @@ var ShellMagnifier = new Lang.Class({
         if (proxyAndZoomRegion && proxyAndZoomRegion.zoomRegion) {
             Main.magnifier.addZoomRegion(proxyAndZoomRegion.zoomRegion);
             return true;
-        }
-        else
+        } else {
             return false;
-    },
+        }
+    }
 
     /**
      * getZoomRegions:
@@ -215,7 +125,7 @@ var ShellMagnifier = new Lang.Class({
         let zoomRegions = Main.magnifier.getZoomRegions();
         let objectPaths = [];
         let thoseZoomers = this._zoomers;
-        zoomRegions.forEach ((aZoomRegion, index, array) => {
+        zoomRegions.forEach (aZoomRegion => {
             let found = false;
             for (let objectPath in thoseZoomers) {
                 let proxyAndZoomRegion = thoseZoomers[objectPath];
@@ -238,7 +148,7 @@ var ShellMagnifier = new Lang.Class({
             }
         });
         return objectPaths;
-    },
+    }
 
     /**
      * clearAllZoomRegions:
@@ -254,7 +164,7 @@ var ShellMagnifier = new Lang.Class({
             delete this._zoomers[objectPath];
         }
         this._zoomers = {};
-    },
+    }
 
     /**
      * fullScreenCapable:
@@ -263,82 +173,82 @@ var ShellMagnifier = new Lang.Class({
      */
     fullScreenCapable() {
         return true;
-    },
+    }
 
     /**
      * setCrosswireSize:
      * Set the crosswire size of all ZoomRegions.
      * @size:   The thickness of each line in the cross wire.
      */
-     setCrosswireSize(size) {
+    setCrosswireSize(size) {
         Main.magnifier.setCrosshairsThickness(size);
-     },
+    }
 
     /**
      * getCrosswireSize:
      * Get the crosswire size of all ZoomRegions.
      * @return:   The thickness of each line in the cross wire.
      */
-     getCrosswireSize() {
+    getCrosswireSize() {
         return Main.magnifier.getCrosshairsThickness();
-     },
+    }
 
     /**
      * setCrosswireLength:
      * Set the crosswire length of all zoom-regions..
      * @size:   The length of each line in the cross wire.
      */
-     setCrosswireLength(length) {
+    setCrosswireLength(length) {
         Main.magnifier.setCrosshairsLength(length);
-     },
+    }
 
     /**
      * setCrosswireSize:
      * Set the crosswire size of all zoom-regions.
      * @size:   The thickness of each line in the cross wire.
      */
-     getCrosswireLength() {
+    getCrosswireLength() {
         return Main.magnifier.getCrosshairsLength();
-     },
+    }
 
     /**
      * setCrosswireClip:
      * Set if the crosswire will be clipped by the cursor image..
      * @clip:   Flag to indicate whether to clip the crosswire.
      */
-     setCrosswireClip(clip) {
+    setCrosswireClip(clip) {
         Main.magnifier.setCrosshairsClip(clip);
-     },
+    }
 
     /**
      * getCrosswireClip:
      * Get the crosswire clip value.
      * @return:   Whether the crosswire is clipped by the cursor image.
      */
-     getCrosswireClip() {
+    getCrosswireClip() {
         return Main.magnifier.getCrosshairsClip();
-     },
+    }
 
     /**
      * setCrosswireColor:
      * Set the crosswire color of all ZoomRegions.
      * @color:   Unsigned int of the form rrggbbaa.
      */
-     setCrosswireColor(color) {
+    setCrosswireColor(color) {
         Main.magnifier.setCrosshairsColor('#%08x'.format(color));
-     },
+    }
 
     /**
      * getCrosswireClip:
      * Get the crosswire color of all ZoomRegions.
      * @return:   The crosswire color as an unsigned int in the form rrggbbaa.
      */
-     getCrosswireColor() {
+    getCrosswireColor() {
         let colorString = Main.magnifier.getCrosshairsColor();
         // Drop the leading '#'.
         return parseInt(colorString.slice(1), 16);
-     }
-});
+    }
+};
 
 /**
  * ShellMagnifierZoomRegion:
@@ -346,15 +256,13 @@ var ShellMagnifier = new Lang.Class({
  * @zoomerObjectPath:   String that is the path to a DBus ZoomRegion.
  * @zoomRegion:         The actual zoom region associated with the object path.
  */
-var ShellMagnifierZoomRegion = new Lang.Class({
-    Name: 'ShellMagnifierZoomRegion',
-
-    _init(zoomerObjectPath, zoomRegion) {
+var ShellMagnifierZoomRegion = class ShellMagnifierZoomRegion {
+    constructor(zoomerObjectPath, zoomRegion) {
         this._zoomRegion = zoomRegion;
 
         this._dbusImpl = Gio.DBusExportedObject.wrapJSObject(ZoomRegionIface, this);
         this._dbusImpl.export(Gio.DBus.session, zoomerObjectPath);
-    },
+    }
 
     /**
      * setMagFactor:
@@ -366,7 +274,7 @@ var ShellMagnifierZoomRegion = new Lang.Class({
      */
     setMagFactor(xMagFactor, yMagFactor) {
         this._zoomRegion.setMagFactor(xMagFactor, yMagFactor);
-    },
+    }
 
     /**
      * getMagFactor:
@@ -377,7 +285,7 @@ var ShellMagnifierZoomRegion = new Lang.Class({
      */
     getMagFactor() {
         return this._zoomRegion.getMagFactor();
-    },
+    }
 
     /**
      * setRoi:
@@ -389,7 +297,7 @@ var ShellMagnifierZoomRegion = new Lang.Class({
     setRoi(roi) {
         let roiObject = { x: roi[0], y: roi[1], width: roi[2] - roi[0], height: roi[3] - roi[1] };
         this._zoomRegion.setROI(roiObject);
-    },
+    }
 
     /**
      * getRoi:
@@ -404,7 +312,7 @@ var ShellMagnifierZoomRegion = new Lang.Class({
         roi[2] += roi[0];
         roi[3] += roi[1];
         return roi;
-    },
+    }
 
     /**
      * Set the "region of interest" by centering the given screen coordinate
@@ -417,7 +325,7 @@ var ShellMagnifierZoomRegion = new Lang.Class({
     shiftContentsTo(x, y) {
         this._zoomRegion.scrollContentsTo(x, y);
         return true;
-    },
+    }
 
     /**
      * moveResize
@@ -428,9 +336,9 @@ var ShellMagnifierZoomRegion = new Lang.Class({
     moveResize(viewPort) {
         let viewRect = { x: viewPort[0], y: viewPort[1], width: viewPort[2] - viewPort[0], height: viewPort[3] - viewPort[1] };
         this._zoomRegion.setViewPort(viewRect);
-    },
+    }
 
     destroy() {
         this._dbusImpl.unexport();
     }
-});
+};
