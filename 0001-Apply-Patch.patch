@@ -1,14 +1,14 @@
-From 36c2c8287af9d26e86eaeb0e6ac8a82db0219d73 Mon Sep 17 00:00:00 2001
+From 7896a3fa9de86c8fc5a3c8d7cee01ae1500bb408 Mon Sep 17 00:00:00 2001
 From: Vjeko Brajkovic <vjeko@brajkovic.org>
-Date: Mon, 11 Nov 2019 14:55:33 -0800
-Subject: [PATCH] Apply Patch
+Date: Thu, 19 Dec 2019 14:38:34 -0800
+Subject: [PATCH] apply, fixes and script
 
 ---
- ui/magnifier.js | 150 ++++++++++++++++++++++++++++++++++++++----------
- 1 file changed, 121 insertions(+), 29 deletions(-)
+ ui/magnifier.js | 152 +++++++++++++++++++++++++++++++++++++++---------
+ 1 file changed, 123 insertions(+), 29 deletions(-)
 
 diff --git a/ui/magnifier.js b/ui/magnifier.js
-index 0ec30ee..fa297cd 100644
+index 70b1291..ac4280e 100644
 --- a/ui/magnifier.js
 +++ b/ui/magnifier.js
 @@ -40,6 +40,56 @@ const CROSS_HAIRS_OPACITY_KEY   = 'cross-hairs-opacity';
@@ -105,7 +105,7 @@ index 0ec30ee..fa297cd 100644
  
          St.Settings.get().connect('notify::magnifier-active', () => {
              this.setActive(St.Settings.get().magnifier_active);
-@@ -231,11 +294,12 @@ var Magnifier = class Magnifier {
+@@ -235,11 +298,12 @@ var Magnifier = class Magnifier {
              this.xMouse = xMouse;
              this.yMouse = yMouse;
  
@@ -122,17 +122,21 @@ index 0ec30ee..fa297cd 100644
              if (sysMouseOverAny)
                  this.hideSystemCursor();
              else
-@@ -617,7 +681,8 @@ var Magnifier = class Magnifier {
+@@ -619,9 +683,12 @@ var Magnifier = class Magnifier {
+     _updateMagFactor() {
+         // Applies only to the first zoom region.
          if (this._zoomRegions.length) {
++            let [xMouse, yMouse] = global.get_pointer();
              // Mag factor is accurate to two decimal places.
              let magFactor = parseFloat(this._settings.get_double(MAG_FACTOR_KEY).toFixed(2));
 -            this._zoomRegions[0].setMagFactor(magFactor, magFactor);
-+            let zoomRegion = this._zoomRegions[idx];
++            let monitorIdx = this._tree.find([xMouse, yMouse]);
++            let zoomRegion = this._zoomRegions[monitorIdx];
 +            zoomRegion.setMagFactor(magFactor, magFactor);
          }
      }
  
-@@ -707,7 +772,7 @@ var Magnifier = class Magnifier {
+@@ -711,7 +778,7 @@ var Magnifier = class Magnifier {
  Signals.addSignalMethods(Magnifier.prototype);
  
  var ZoomRegion = class ZoomRegion {
@@ -141,7 +145,7 @@ index 0ec30ee..fa297cd 100644
          this._magnifier = magnifier;
          this._focusCaretTracker = new FocusCaretTracker.FocusCaretTracker();
  
-@@ -730,10 +795,10 @@ var ZoomRegion = class ZoomRegion {
+@@ -734,10 +801,10 @@ var ZoomRegion = class ZoomRegion {
          this._crossHairs = null;
          this._crossHairsActor = null;
  
@@ -156,7 +160,7 @@ index 0ec30ee..fa297cd 100644
          this._xCenter = this._viewPortWidth / 2;
          this._yCenter = this._viewPortHeight / 2;
          this._xMagFactor = 1;
-@@ -978,6 +1043,20 @@ var ZoomRegion = class ZoomRegion {
+@@ -982,6 +1049,20 @@ var ZoomRegion = class ZoomRegion {
                  roiWidth, roiHeight];
      }
  
@@ -177,7 +181,7 @@ index 0ec30ee..fa297cd 100644
      /**
       * setLensMode:
       * Turn lens mode on/off.  In full screen mode, lens mode does nothing since
-@@ -1339,18 +1418,13 @@ var ZoomRegion = class ZoomRegion {
+@@ -1343,18 +1424,13 @@ var ZoomRegion = class ZoomRegion {
      _setViewPort(viewPort, fromROIUpdate) {
          // Sets the position of the zoom region on the screen
  
@@ -200,7 +204,7 @@ index 0ec30ee..fa297cd 100644
  
          this._updateMagViewGeometry();
  
-@@ -1529,11 +1603,16 @@ var ZoomRegion = class ZoomRegion {
+@@ -1533,11 +1609,16 @@ var ZoomRegion = class ZoomRegion {
          return [xPoint, yPoint];
      }
  
@@ -220,7 +224,7 @@ index 0ec30ee..fa297cd 100644
      }
  
      _updateMagViewGeometry() {
-@@ -1556,7 +1635,13 @@ var ZoomRegion = class ZoomRegion {
+@@ -1560,7 +1641,13 @@ var ZoomRegion = class ZoomRegion {
          this._uiGroupClone.set_scale(this._xMagFactor, this._yMagFactor);
          this._mouseActor.set_scale(this._xMagFactor, this._yMagFactor);
  
@@ -235,7 +239,7 @@ index 0ec30ee..fa297cd 100644
          this._uiGroupClone.set_position(Math.round(x), Math.round(y));
  
          this._updateMousePosition();
-@@ -1566,8 +1651,15 @@ var ZoomRegion = class ZoomRegion {
+@@ -1570,8 +1657,15 @@ var ZoomRegion = class ZoomRegion {
          if (!this.isActive())
              return;
  
@@ -252,7 +256,7 @@ index 0ec30ee..fa297cd 100644
  
          xMagMouse = Math.round(xMagMouse);
          yMagMouse = Math.round(yMagMouse);
-@@ -1577,7 +1669,7 @@ var ZoomRegion = class ZoomRegion {
+@@ -1581,7 +1675,7 @@ var ZoomRegion = class ZoomRegion {
          if (this._crossHairsActor) {
              let [groupWidth, groupHeight] = this._crossHairsActor.get_size();
              this._crossHairsActor.set_position(xMagMouse - groupWidth / 2,
@@ -262,5 +266,5 @@ index 0ec30ee..fa297cd 100644
      }
  
 -- 
-2.24.0
+2.25.0.rc1
 
